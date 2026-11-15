@@ -41,6 +41,11 @@ class TriageRequest(BaseModel):
     scenario_override: str = ""
 
 
+class ChatRequest(BaseModel):
+    message: str
+    ward: str = "Homa Bay Central"
+
+
 class DecisionRequest(BaseModel):
     run_id: str
     approved: bool
@@ -115,6 +120,61 @@ def run_triage(request: TriageRequest) -> dict[str, Any]:
         return triage(request.ward, request.scenario_override)
     except (ValueError, KeyError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/agent/chat")
+def agent_chat(request: ChatRequest) -> dict[str, Any]:
+    """Translate a plain-language question into a grounded, inspectable run."""
+    normalized = request.message.lower()
+    scenario = (
+        "flash flood waterlogging"
+        if "flood" in normalized or "water" in normalized
+        else "flowering maize dry spell"
+        if "flower" in normalized
+        else "sudden dry spell"
+    )
+    try:
+        result = triage(request.ward, scenario)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "message": "I found grounded evidence and prepared an advisory for your review.",
+        "question": request.message,
+        "run": result,
+    }
+
+
+@app.get("/api/mcp/registry")
+def mcp_registry() -> dict[str, Any]:
+    """Expose the configured MCP servers and recent tool activity."""
+    servers = [
+        {
+            "id": "ecovuna-telemetry",
+            "name": "Ecovuna Telemetry",
+            "transport": "local process",
+            "tools": [
+                "fetch_kijanibox_telemetry",
+                "fetch_open_meteo_context",
+                "fetch_kalro_guidelines",
+                "stage_advisory_for_wao_approval",
+            ],
+            "status": "ready",
+        },
+        {
+            "id": "kalro-reference-fetch",
+            "name": "KALRO Reference Fetch",
+            "transport": "MCP subprocess",
+            "tools": ["fetch"],
+            "status": "configured",
+        },
+    ]
+    with connect() as db:
+        activity = [
+            dict(row) for row in db.execute(
+                "SELECT server, tool_name, timestamp FROM mcp_audit_log ORDER BY id DESC LIMIT 10"
+            )
+        ]
+    return {"servers": servers, "recent_activity": activity}
 
 
 @app.post("/api/agent/decide")

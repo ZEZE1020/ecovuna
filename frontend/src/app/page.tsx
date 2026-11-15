@@ -5,7 +5,7 @@ import type { FormEvent, ReactNode } from "react";
 import {
   Activity, Check, CircleAlert, ClipboardCheck, Clock3, Database,
   FileSearch, Flag, LockKeyhole, Play, Radar, ShieldCheck, Sparkles,
-  Terminal, UserPlus, UserRound, Workflow, X,
+  MessageCircle, Send, Terminal, UserPlus, UserRound, Workflow, X,
 } from "lucide-react";
 
 type Ward = {
@@ -92,11 +92,13 @@ type Run = {
 type Audit = { id: number; timestamp: string; run_id: string; server: string; tool_name: string; action: string; input_json: string; output_json: string };
 type AgentFoundation = { project: string; provider: string; model: string; mode: string; grounded: boolean; human_approval_required: boolean };
 type EvaluationSummary = { passed: number; total: number; pass_rate: number; interpretation: { data_grounding: string; agent_usefulness: string; model_status: string } };
+type ChatMessage = { role: "user" | "agent"; text: string; run?: Run };
+type McpRegistry = { servers: Array<{ id: string; name: string; transport: string; tools: string[]; status: string }>; recent_activity: Array<{ server: string; tool_name: string; timestamp: string }> };
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 export default function Home() {
-  const [view, setView] = useState<"overview" | "workspace" | "operations" | "registry" | "audit">("overview");
+  const [view, setView] = useState<"overview" | "workspace" | "operations" | "registry" | "mcp" | "audit">("overview");
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [advisories, setAdvisories] = useState<Advisory[]>([]);
   const [audit, setAudit] = useState<Audit[]>([]);
@@ -106,6 +108,7 @@ export default function Home() {
   const [apiTelemetry, setApiTelemetry] = useState<{ enabled: boolean; exporter: string } | null>(null);
   const [foundation, setFoundation] = useState<AgentFoundation | null>(null);
   const [evaluation, setEvaluation] = useState<EvaluationSummary | null>(null);
+  const [mcpRegistry, setMcpRegistry] = useState<McpRegistry | null>(null);
   const [run, setRun] = useState<Run | null>(null);
   const [ward, setWard] = useState("");
   const [scenario, setScenario] = useState("sudden dry spell");
@@ -113,6 +116,12 @@ export default function Home() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [askQuestion, setAskQuestion] = useState("");
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    { role: "agent", text: "Hello. Ask me about a ward, a dry spell, flood risk, or the next field action. I will show my evidence and pause for your approval." },
+  ]);
+  const [chatLoading, setChatLoading] = useState(false);
 
   async function loadData() {
     const [dashboardResponse, advisoriesResponse, evaluationResponse] = await Promise.all([
@@ -169,11 +178,12 @@ export default function Home() {
     setRecommendations(await recommendationsResponse.json());
   }
 
-  async function openView(nextView: "overview" | "workspace" | "operations" | "registry" | "audit") {
+  async function openView(nextView: "overview" | "workspace" | "operations" | "registry" | "mcp" | "audit") {
     setView(nextView);
     setError("");
     if (nextView === "audit") loadAudit().catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Unable to load the audit trail."));
     if (nextView === "operations") loadOperations().catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Unable to load extension operations."));
+    if (nextView === "mcp") fetch(`${API}/api/mcp/registry`).then((response) => response.json() as Promise<McpRegistry>).then(setMcpRegistry).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Unable to load MCP registry."));
   }
 
   async function startRun(requestedScenario = scenario) {
@@ -209,6 +219,30 @@ export default function Home() {
     await startRun(requestedScenario);
   }
 
+  async function sendChat(event: FormEvent) {
+    event.preventDefault();
+    const message = chatInput.trim();
+    if (!message || !ward || chatLoading) return;
+    setChatInput("");
+    setChatMessages((items) => [...items, { role: "user", text: message }]);
+    setChatLoading(true);
+    try {
+      const response = await fetch(`${API}/api/agent/chat`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, ward }),
+      });
+      if (!response.ok) throw new Error((await response.json()).detail ?? "The agent could not answer.");
+      const payload = await response.json() as { message: string; run: Run };
+      setRun(payload.run);
+      setChatMessages((items) => [...items, { role: "agent", text: `${payload.message} The run is paused at the named WAO approval gate.`, run: payload.run }]);
+      await loadData();
+    } catch (reason) {
+      setChatMessages((items) => [...items, { role: "agent", text: reason instanceof Error ? reason.message : "The agent could not answer." }]);
+    } finally {
+      setChatLoading(false);
+    }
+  }
+
   async function decide(approved: boolean) {
     if (!run) return;
     setError("");
@@ -230,13 +264,20 @@ export default function Home() {
   return <main className="agent-shell">
     <header className="agent-header"><div className="agent-brand"><span className="brand-mark"><Sparkles size={17} /></span><div><strong>ECOVUNA DESK</strong><span>Agent operations · Homa Bay County</span></div></div><div className="header-meta"><span className="badge badge-success badge-outline gap-1"><i /> API connected</span>{foundation && <span className="badge badge-primary badge-outline" title={`${foundation.project} · ${foundation.model}`}>FOUNDATION · {foundation.mode.replace("_", " ")}</span>}{apiTelemetry && <span className={`otel-status ${apiTelemetry.enabled ? "enabled" : "disabled"}`} title={`OpenTelemetry exporter: ${apiTelemetry.exporter}`}>OTEL {apiTelemetry.enabled ? "ON" : "OFF"}</span>}<span className="user-badge"><UserRound size={15} /></span><span>Godfrey Ogembo<br /><small>WAO-KE-043</small></span></div></header>
     <div className="agent-layout">
-      <aside className="agent-nav"><div className="office-card"><span>ACTIVE OFFICE</span><strong>Extension network</strong><small>County operations workspace</small></div><span className="nav-heading">OPERATIONS</span><NavButton active={view === "overview"} label="Situation overview" icon={<Radar size={16} />} onClick={() => openView("overview")} /><NavButton active={view === "workspace"} label="Agent workspace" icon={<Workflow size={16} />} onClick={() => openView("workspace")} count={dashboard?.counts.pending_advisories} /><NavButton active={view === "registry"} label="Farm registry" icon={<UserPlus size={16} />} onClick={() => openView("registry")} count={dashboard?.counts.households} /><NavButton active={view === "operations"} label="Partner matching" icon={<Database size={16} />} onClick={() => openView("operations")} count={operationsSummary?.recommended_assignments} /><NavButton active={view === "audit"} label="Audit trail" icon={<ClipboardCheck size={16} />} onClick={() => openView("audit")} /><div className="nav-note"><LockKeyhole size={15} /><strong>Human approval required</strong><span>Every outbound action pauses for named officer sign-off.</span></div></aside>
-      <section className="agent-content"><div className="content-title"><div><span className="kicker">EXTENSION OPERATIONS CONSOLE</span><h1>{view === "overview" ? "Today’s priorities" : view === "workspace" ? "Agent workspace" : view === "operations" ? "Partner matching" : view === "registry" ? "Farm registry" : "Audit trail"}</h1><p>{view === "overview" ? "A simple starting point for field decisions, farmer follow-up, and trusted advice." : view === "workspace" ? "Inspect the agent's evidence, then make the accountable human decision." : view === "operations" ? "Match farms with verified agrovets, seed hubs, and fertiliser partners using field conditions." : view === "registry" ? "Register farmers and map their farms with an auditable officer workflow." : "Append-only record of agent tool calls and officer decisions."}</p></div>{view !== "audit" && view !== "operations" && view !== "registry" && <button className="run-button btn btn-primary" onClick={() => startRun()} disabled={running || !ward}>✦ {running ? "Agent is working…" : "Run agent analysis"}</button>}</div>{error && <div className="error-message alert alert-error">! {error}</div>}{loading ? <div className="loading-state">Loading county workspace…</div> : view === "overview" ?       <Overview dashboard={dashboard} advisories={advisories} telemetry={telemetry} evaluation={evaluation} ward={ward} setWard={setWard} scenario={scenario} setScenario={setScenario} onStart={startRun} onAsk={askEcovuna} askQuestion={askQuestion} setAskQuestion={setAskQuestion} running={running} onOpenWorkspace={() => openView("workspace")} /> : view === "workspace" ? <Workspace run={run} advisories={advisories} onStart={startRun} onDecision={decide} running={running} /> : view === "operations" ? <Operations summary={operationsSummary} recommendations={recommendations} ward={ward} onRefresh={loadOperations} /> : view === "registry" ? <Registry wards={dashboard?.wards.map((item) => item.ward) ?? []} /> : <AuditTable entries={audit} />}</section>
+      <aside className="agent-nav"><div className="office-card"><span>ACTIVE OFFICE</span><strong>Extension network</strong><small>County operations workspace</small></div><span className="nav-heading">OPERATIONS</span><NavButton active={view === "overview"} label="Situation overview" icon={<Radar size={16} />} onClick={() => openView("overview")} /><NavButton active={view === "workspace"} label="Agent workspace" icon={<Workflow size={16} />} onClick={() => openView("workspace")} count={dashboard?.counts.pending_advisories} /><NavButton active={view === "registry"} label="Farm registry" icon={<UserPlus size={16} />} onClick={() => openView("registry")} count={dashboard?.counts.households} /><NavButton active={view === "operations"} label="Partner matching" icon={<Database size={16} />} onClick={() => openView("operations")} count={operationsSummary?.recommended_assignments} /><NavButton active={view === "mcp"} label="MCP registry" icon={<Terminal size={16} />} onClick={() => openView("mcp")} /><NavButton active={view === "audit"} label="Audit trail" icon={<ClipboardCheck size={16} />} onClick={() => openView("audit")} /><div className="nav-note"><LockKeyhole size={15} /><strong>Human approval required</strong><span>Every outbound action pauses for named officer sign-off.</span></div></aside>
+      <section className="agent-content"><div className="content-title"><div><span className="kicker">EXTENSION OPERATIONS CONSOLE</span><h1>{view === "overview" ? "Today’s priorities" : view === "workspace" ? "Agent workspace" : view === "operations" ? "Partner matching" : view === "registry" ? "Farm registry" : view === "mcp" ? "MCP registry" : "Audit trail"}</h1><p>{view === "overview" ? "A simple starting point for field decisions, farmer follow-up, and trusted advice." : view === "workspace" ? "Inspect the agent's evidence, then make the accountable human decision." : view === "operations" ? "Match farms with verified agrovets, seed hubs, and fertiliser partners using field conditions." : view === "registry" ? "Register farmers and map their farms with an auditable officer workflow." : view === "mcp" ? "Inspect the servers and tools that make every agent run explainable." : "Append-only record of agent tool calls and officer decisions."}</p></div>{view !== "audit" && view !== "operations" && view !== "registry" && view !== "mcp" && <button className="run-button btn btn-primary" onClick={() => startRun()} disabled={running || !ward}>✦ {running ? "Agent is working…" : "Run agent analysis"}</button>}</div>{error && <div className="error-message alert alert-error">! {error}</div>}{loading ? <div className="loading-state">Loading county workspace…</div> : view === "overview" ?       <Overview dashboard={dashboard} advisories={advisories} telemetry={telemetry} evaluation={evaluation} ward={ward} setWard={setWard} scenario={scenario} setScenario={setScenario} onStart={startRun} onAsk={askEcovuna} askQuestion={askQuestion} setAskQuestion={setAskQuestion} running={running} onOpenWorkspace={() => openView("workspace")} /> : view === "workspace" ? <Workspace run={run} advisories={advisories} onStart={startRun} onDecision={decide} running={running} /> : view === "operations" ? <Operations summary={operationsSummary} recommendations={recommendations} ward={ward} onRefresh={loadOperations} /> : view === "registry" ? <Registry wards={dashboard?.wards.map((item) => item.ward) ?? []} /> : view === "mcp" ? <McpRegistryPanel registry={mcpRegistry} /> : <AuditTable entries={audit} />}</section>
     </div>
+    <button className="chat-launcher" onClick={() => setChatOpen((open) => !open)} aria-label="Open Ecovuna agent chat"><MessageCircle size={22} /><span>Ask Ecovuna</span></button>
+    {chatOpen && <section className="agent-chat" aria-label="Ecovuna agent chat"><header><div><strong>Ecovuna agent</strong><small>Grounded · inspectable · approval-aware</small></div><button onClick={() => setChatOpen(false)} aria-label="Close chat"><X size={17} /></button></header><div className="chat-messages">{chatMessages.map((message, index) => <div className={`chat-message ${message.role}`} key={`${message.role}-${index}`}><span>{message.text}</span>{message.run && <button className="chat-run-link" onClick={() => openView("workspace")}>Inspect run →</button>}</div>)}{chatLoading && <div className="chat-message agent"><span className="typing">Agent is checking telemetry and guidance…</span></div>}</div><form className="chat-composer" onSubmit={sendChat}><input value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="Ask about this ward…" aria-label="Message Ecovuna" disabled={chatLoading} /><button type="submit" disabled={chatLoading || !chatInput.trim()} aria-label="Send message"><Send size={17} /></button></form></section>}
   </main>;
 }
 
 function NavButton({ active, label, icon, count, onClick }: { active: boolean; label: string; icon: ReactNode; count?: number; onClick: () => void }) { return <button className={`agent-nav-button ${active ? "active" : ""}`} onClick={onClick}><b>{icon}</b>{label}{count ? <em>{count}</em> : null}</button>; }
+
+function McpRegistryPanel({ registry }: { registry: McpRegistry | null }) {
+  if (!registry) return <div className="loading-state">Loading MCP registry…</div>;
+  return <div className="mcp-registry-grid"><section className="panel-white mcp-servers"><div className="live-heading"><h2>Connected agent servers</h2><span>{registry.servers.length} configured</span></div>{registry.servers.map((server) => <article className="mcp-server" key={server.id}><div><strong>{server.name}</strong><small>{server.transport} · {server.id}</small></div><span className="badge badge-success badge-outline">{server.status}</span><div className="mcp-tools">{server.tools.map((tool) => <code key={tool}>{tool}</code>)}</div></article>)}</section><section className="panel-white mcp-activity"><div className="live-heading"><h2>Recent tool activity</h2><span>From the audit trail</span></div>{registry.recent_activity.length === 0 ? <p className="empty-copy">No tool activity yet.</p> : registry.recent_activity.map((activity, index) => <div className="mcp-activity-row" key={`${activity.timestamp}-${index}`}><strong>{activity.tool_name.replaceAll("_", " ")}</strong><span>{activity.server}</span><time>{new Date(activity.timestamp).toLocaleString()}</time></div>)}</section></div>;
+}
 
 function Registry({ wards }: { wards: string[] }) {
   const [farmers, setFarmers] = useState<Array<{ farmer_id: string; full_name: string; phone_number: string; ward: string; plot_count: number }>>([]);
