@@ -105,6 +105,33 @@ Configure these repository variables before enabling deployment:
 - `GCP_WIF_PROVIDER` (full Workload Identity Provider resource name)
 - `GCP_DEPLOY_SERVICE_ACCOUNT` (service-account email)
 
+Create the GitHub OIDC provider with an attribute condition. Google Cloud
+rejects an unrestricted provider because the condition must reference a claim
+from the GitHub token:
+
+```bash
+gcloud iam workload-identity-pools providers create-oidc github \
+  --project="$GCP_PROJECT_ID" \
+  --location=global \
+  --workload-identity-pool=github-actions \
+  --display-name="GitHub Actions" \
+  --issuer-uri="https://token.actions.githubusercontent.com" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref" \
+  --attribute-condition="assertion.repository == 'ZEZE1020/ecovuna' && (assertion.ref == 'refs/heads/main' || assertion.ref.startsWith('refs/tags/v'))"
+```
+
+If the failed command did not create a provider, rerun it with the same
+provider ID after adding `--attribute-condition`; if a provider already
+exists, update it instead:
+
+```bash
+gcloud iam workload-identity-pools providers update-oidc github \
+  --project="$GCP_PROJECT_ID" \
+  --location=global \
+  --workload-identity-pool=github-actions \
+  --attribute-condition="assertion.repository == 'ZEZE1020/ecovuna' && (assertion.ref == 'refs/heads/main' || assertion.ref.startsWith('refs/tags/v'))"
+```
+
 Enable Cloud Run and Cloud Build APIs in the project. The deploy service
 account needs permission to deploy Cloud Run services, including permission to
 act as the runtime service account selected by Cloud Run. The GitHub Actions
