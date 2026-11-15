@@ -138,6 +138,28 @@ The frontend receives the API URL at image build time. A custom domain such as
 `ecovuna.vpasi.app` is mapped separately through Cloud Run domain mapping and
 DNS.
 
+### Keeping local and deployed UI identical
+
+`make dev` runs the current checkout; Cloud Run runs an immutable release tag.
+Always validate the exact commit you intend to deploy, then create the tag
+from that commit:
+
+```bash
+git status
+git pull --ff-only origin main
+make test
+git tag -a v0.2.0 -m "Ecovuna release v0.2.0"
+git push origin main
+git push origin v0.2.0
+```
+
+The workflow embeds the release tag in the frontend and API. The UI displays
+the release, `/api/health` reports it, and deployment fails if the API reports
+a different release. Do not edit production containers manually or deploy
+`latest`; use a new version tag for every visible change. If a browser shows
+an older screen, check the displayed release first, then hard-refresh after
+the Cloud Run revision and domain cache have updated.
+
 ## Boundaries and next work
 
 This is a working agentic prototype, not a production agricultural authority.

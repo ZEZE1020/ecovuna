@@ -27,6 +27,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Ecovuna Desk API", version="1.0.0", lifespan=lifespan)
+release_version = os.getenv("RELEASE_VERSION", "local")
 configure_fastapi(app)
 allowed_origins = [
     origin for origin in (
@@ -99,6 +100,7 @@ class PlotOnboardingRequest(BaseModel):
 def health() -> dict[str, Any]:
     return {
         "status": "ok",
+        "release_version": release_version,
         "storage_backend": storage_backend(),
         "telemetry": telemetry_status(),
         "agent_foundation": get_agent_foundation().as_dict(),

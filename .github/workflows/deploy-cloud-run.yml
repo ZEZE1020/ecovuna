@@ -79,7 +79,7 @@ jobs:
             --memory 512Mi \
             --min-instances 0 \
             --max-instances 2 \
-            --set-env-vars "FRONTEND_ORIGIN=https://${DOMAIN},LLM_PROVIDER=deterministic_offline,STORAGE_BACKEND=firestore,GOOGLE_CLOUD_PROJECT=${PROJECT_ID}"
+            --set-env-vars "FRONTEND_ORIGIN=https://${DOMAIN},LLM_PROVIDER=deterministic_offline,STORAGE_BACKEND=firestore,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},RELEASE_VERSION=${RELEASE_TAG}"
           echo "API_URL=$(gcloud run services describe "$API_SERVICE" \
             --region "$REGION" --project "$PROJECT_ID" \
             --format='value(status.url)')" >> "$GITHUB_ENV"
@@ -91,6 +91,7 @@ jobs:
         run: |
           docker build --file frontend/Dockerfile \
             --build-arg NEXT_PUBLIC_API_BASE_URL="$API_URL" \
+            --build-arg NEXT_PUBLIC_RELEASE_VERSION="$RELEASE_TAG" \
             --tag "$IMAGE" frontend
           docker tag "$IMAGE" "$SHA_IMAGE"
           docker push "$IMAGE"
@@ -117,6 +118,7 @@ jobs:
             --region "$REGION" --project "$PROJECT_ID" \
             --format='value(status.url)')
           curl --fail --retry 5 --retry-delay 5 "$API_URL/api/health"
+          test "$(curl --fail --retry 5 --retry-delay 5 "$API_URL/api/health" | jq -r .release_version)" = "$RELEASE_TAG"
           curl --fail --retry 5 --retry-delay 5 "$WEB_URL"
           CSS_PATH=$(curl --fail --retry 5 --retry-delay 5 "$WEB_URL" \
             | sed -n 's/.*href="\([^"]*\.css\)".*/\1/p' | head -n 1)
