@@ -18,10 +18,11 @@ inputs, outputs, timestamps, and decisions are written to the audit trail.
 
 ## Tools and servers
 
-`Ecovuna_Telemetry` contains the project-owned tools for telemetry, weather
-context, agronomy guidance, and advisory staging. `mcp-server-fetch` is the
-borrowed reference-fetch server declared in `mcp.json`; it is used for
-retrieving external reference material rather than being duplicated locally.
+`Ecovuna_Telemetry` contains the project-owned tool functions for telemetry,
+weather context, agronomy guidance, and advisory staging. `mcp-server-fetch`
+is the borrowed reference-fetch server declared in `mcp.json`. The complete
+protocol runtime and live borrowed-server recommendation path are tracked as
+follow-up work; the current deterministic path uses committed local guidance.
 
 The current deterministic planner is the reliable offline baseline. Ollama and
 Gemini metadata are supported, but a full model-backed planner remains an
