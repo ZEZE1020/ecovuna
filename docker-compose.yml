@@ -1,0 +1,25 @@
+services:
+  backend:
+    build: {context: ., dockerfile: backend/Dockerfile}
+    ports: ["8000:8000"]
+    volumes: ["./data:/app/data"]
+    environment:
+      OTEL_SERVICE_NAME: ecovuna-api
+      OTEL_DEPLOYMENT_ENVIRONMENT: docker
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on: [jaeger]
+  frontend:
+    build: {context: ./frontend, dockerfile: Dockerfile}
+    ports: ["3000:3000"]
+    environment: {NEXT_PUBLIC_API_BASE_URL: http://localhost:8000}
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    ports: ["11434:11434"]
+  jaeger:
+    image: jaegertracing/all-in-one:1.57.0
+    ports:
+      - "16686:16686"
+      - "4318:4318"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"

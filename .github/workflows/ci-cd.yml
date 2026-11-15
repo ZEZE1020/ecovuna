@@ -1,0 +1,35 @@
+name: Ecovuna CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: {python-version: "3.11"}
+      - run: uv sync --project backend
+      - run: uv run --project backend ruff check backend
+      - run: uv run --project backend python -m backend.ingest --offline-fallback
+      - run: uv run --project backend pytest backend/tests
+      - run: uv run --project backend python -m backend.evals.run_evals --trials 3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - run: pnpm build
+        working-directory: frontend

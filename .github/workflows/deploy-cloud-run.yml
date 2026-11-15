@@ -1,0 +1,116 @@
+name: Deploy Ecovuna to Cloud Run
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  packages: write
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION }}
+  API_SERVICE: ecovuna-api
+  WEB_SERVICE: ecovuna-web
+  DOMAIN: ecovuna.vpasi.app
+  REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: ${{ github.repository_owner }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set image tags
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "RELEASE_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_TAG=sha-${GITHUB_SHA::12}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Build and push API image
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/ecovuna-api:${{ env.RELEASE_TAG }}
+          SHA_IMAGE: ghcr.io/${{ github.repository_owner }}/ecovuna-api:sha-${{ github.sha }}
+        run: |
+          docker build --file backend/Dockerfile --tag "$IMAGE" .
+          docker tag "$IMAGE" "$SHA_IMAGE"
+          docker push "$IMAGE"
+          docker push "$SHA_IMAGE"
+          echo "API_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy API
+        run: |
+          gcloud run deploy "$API_SERVICE" \
+            --image "$API_IMAGE" \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 8000 \
+            --memory 512Mi \
+            --min-instances 0 \
+            --max-instances 2 \
+            --set-env-vars "FRONTEND_ORIGIN=https://${DOMAIN},LLM_PROVIDER=deterministic_offline"
+          echo "API_URL=$(gcloud run services describe "$API_SERVICE" \
+            --region "$REGION" --project "$PROJECT_ID" \
+            --format='value(status.url)')" >> "$GITHUB_ENV"
+
+      - name: Build and push web image
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/ecovuna-web:${{ env.RELEASE_TAG }}
+          SHA_IMAGE: ghcr.io/${{ github.repository_owner }}/ecovuna-web:sha-${{ github.sha }}
+        run: |
+          docker build --file frontend/Dockerfile \
+            --build-arg NEXT_PUBLIC_API_BASE_URL="$API_URL" \
+            --tag "$IMAGE" frontend
+          docker tag "$IMAGE" "$SHA_IMAGE"
+          docker push "$IMAGE"
+          docker push "$SHA_IMAGE"
+          echo "WEB_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy web
+        run: |
+          gcloud run deploy "$WEB_SERVICE" \
+            --image "$WEB_IMAGE" \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 3000 \
+            --memory 512Mi \
+            --min-instances 0 \
+            --max-instances 2
+
+      - name: Smoke test API and web services
+        run: |
+          WEB_URL=$(gcloud run services describe "$WEB_SERVICE" \
+            --region "$REGION" --project "$PROJECT_ID" \
+            --format='value(status.url)')
+          curl --fail --retry 5 --retry-delay 5 "$API_URL/api/health"
+          curl --fail --retry 5 --retry-delay 5 "$WEB_URL"
+          echo "API: $API_URL"
+          echo "Web service: $WEB_URL"
+          echo "Custom domain mapping is configured separately for Cloudflare DNS."
