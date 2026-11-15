@@ -21,14 +21,14 @@ jobs:
       - run: uv run --project backend pytest backend/tests
       - run: uv run --project backend python -m backend.evals.run_evals --trials 3
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
       - run: pnpm build
