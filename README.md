@@ -167,9 +167,12 @@ gcloud beta firestore databases create \
   --database='(default)' \
   --location="$GCP_REGION" \
   --type=firestore-native \
-  --tags=resource_generated_by=cloud_db_onboarding_skill \
   --project="$GCP_PROJECT_ID"
 ```
+
+The `--tags` flag is optional and requires a pre-created organization or
+project tag key. Do not use a plain `key=value` value there; that format is
+for labels, not Resource Manager tags.
 
 Grant the runtime identity Firestore access:
 
