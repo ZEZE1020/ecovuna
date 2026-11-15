@@ -17,7 +17,6 @@ env:
   WEB_SERVICE: ecovuna-web
   DOMAIN: ecovuna.vpasi.app
   REGISTRY: ghcr.io
-  IMAGE_NAMESPACE: ${{ github.repository_owner }}
 
 jobs:
   deploy:
@@ -27,6 +26,7 @@ jobs:
 
       - name: Set image tags
         run: |
+          echo "IMAGE_NAMESPACE=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             echo "RELEASE_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
           else
@@ -51,8 +51,8 @@ jobs:
 
       - name: Build and push API image
         env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/ecovuna-api:${{ env.RELEASE_TAG }}
-          SHA_IMAGE: ghcr.io/${{ github.repository_owner }}/ecovuna-api:sha-${{ github.sha }}
+          IMAGE: ghcr.io/${{ env.IMAGE_NAMESPACE }}/ecovuna-api:${{ env.RELEASE_TAG }}
+          SHA_IMAGE: ghcr.io/${{ env.IMAGE_NAMESPACE }}/ecovuna-api:sha-${{ github.sha }}
         run: |
           docker build --file backend/Dockerfile --tag "$IMAGE" .
           docker tag "$IMAGE" "$SHA_IMAGE"
@@ -79,8 +79,8 @@ jobs:
 
       - name: Build and push web image
         env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/ecovuna-web:${{ env.RELEASE_TAG }}
-          SHA_IMAGE: ghcr.io/${{ github.repository_owner }}/ecovuna-web:sha-${{ github.sha }}
+          IMAGE: ghcr.io/${{ env.IMAGE_NAMESPACE }}/ecovuna-web:${{ env.RELEASE_TAG }}
+          SHA_IMAGE: ghcr.io/${{ env.IMAGE_NAMESPACE }}/ecovuna-web:sha-${{ github.sha }}
         run: |
           docker build --file frontend/Dockerfile \
             --build-arg NEXT_PUBLIC_API_BASE_URL="$API_URL" \
