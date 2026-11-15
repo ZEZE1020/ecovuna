@@ -158,6 +158,39 @@ Engine API first. For stronger isolation later, replace it with a dedicated
 runtime service account and grant the same narrowly scoped binding to that
 account.
 
+Create one Firestore Native database in the same region before the first
+release. Firestore provides the durable Cloud Run store while SQLite remains
+the local/offline development store:
+
+```bash
+gcloud beta firestore databases create \
+  --database='(default)' \
+  --location="$GCP_REGION" \
+  --type=firestore-native \
+  --tags=resource_generated_by=cloud_db_onboarding_skill \
+  --project="$GCP_PROJECT_ID"
+```
+
+Grant the runtime identity Firestore access:
+
+```bash
+gcloud projects add-iam-policy-binding "$GCP_PROJECT_ID" \
+  --member="serviceAccount:$RUNTIME_SA" \
+  --role="roles/datastore.user"
+```
+
+The adapter snapshots the existing SQLite-shaped registry, advisory, audit,
+and assignment tables into one Firestore document. This keeps the current
+agent behavior stable while removing Cloud Run's ephemeral-disk limitation.
+The snapshot is intentionally a prototype bridge; before high-concurrency
+pilots, move to native Firestore collections and transactions.
+
+The Firestore free quota is limited to one free database per project and
+currently includes 1 GiB stored data, 50,000 document reads/day, 20,000
+writes/day, 20,000 deletes/day, and 10 GiB/month outbound transfer. Usage
+above those quotas is billable, so configure budget alerts before inviting
+external users.
+
 Images are published to the repository's GitHub Container Registry packages:
 `ghcr.io/zeze1020/ecovuna-api` and `ghcr.io/zeze1020/ecovuna-web`. Make both
 packages public before the first Cloud Run deployment, because Cloud Run pulls

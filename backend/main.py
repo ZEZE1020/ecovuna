@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .agent import decide, triage
-from .db import connect, initialize
+from .db import connect, initialize, storage_backend
 from .evals.summary import summary as evaluation_summary
 from .foundation import get_agent_foundation
 from .observability import configure_fastapi, telemetry_status
@@ -89,7 +89,12 @@ def startup() -> None:
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
-    return {"status": "ok", "telemetry": telemetry_status(), "agent_foundation": get_agent_foundation().as_dict()}
+    return {
+        "status": "ok",
+        "storage_backend": storage_backend(),
+        "telemetry": telemetry_status(),
+        "agent_foundation": get_agent_foundation().as_dict(),
+    }
 
 
 @app.get("/api/agent/foundation")

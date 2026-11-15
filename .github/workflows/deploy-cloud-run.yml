@@ -79,7 +79,7 @@ jobs:
             --memory 512Mi \
             --min-instances 0 \
             --max-instances 2 \
-            --set-env-vars "FRONTEND_ORIGIN=https://${DOMAIN},LLM_PROVIDER=deterministic_offline"
+            --set-env-vars "FRONTEND_ORIGIN=https://${DOMAIN},LLM_PROVIDER=deterministic_offline,STORAGE_BACKEND=firestore,GOOGLE_CLOUD_PROJECT=${PROJECT_ID}"
           echo "API_URL=$(gcloud run services describe "$API_SERVICE" \
             --region "$REGION" --project "$PROJECT_ID" \
             --format='value(status.url)')" >> "$GITHUB_ENV"
