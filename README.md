@@ -31,6 +31,8 @@ Then open:
 - API documentation: `http://localhost:8000/docs`
 - Local-only lifecycle, architecture, evaluation, and roadmap notes are kept
   under `.private/` and are intentionally excluded from version control.
+- Public architecture: [`ARCHITECTURE.md`](./ARCHITECTURE.md)
+- Public evaluation report: [`EVALS.md`](./EVALS.md)
 
 ### OpenTelemetry
 

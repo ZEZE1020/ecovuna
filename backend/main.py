@@ -5,12 +5,13 @@ import json
 import math
 import os
 import uuid
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .agent import decide, triage
 from .db import connect, initialize, storage_backend
@@ -18,7 +19,14 @@ from .evals.summary import summary as evaluation_summary
 from .foundation import get_agent_foundation
 from .observability import configure_fastapi, telemetry_status
 
-app = FastAPI(title="Ecovuna Desk API", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    initialize()
+    yield
+
+
+app = FastAPI(title="Ecovuna Desk API", version="1.0.0", lifespan=lifespan)
 configure_fastapi(app)
 allowed_origins = [
     origin for origin in (
@@ -37,13 +45,13 @@ app.add_middleware(
 
 
 class TriageRequest(BaseModel):
-    ward: str = "Homa Bay Central"
+    ward: str = Field(default="Homa Bay Central", min_length=1, max_length=100)
     scenario_override: str = ""
 
 
 class ChatRequest(BaseModel):
-    message: str
-    ward: str = "Homa Bay Central"
+    message: str = Field(min_length=1, max_length=1000)
+    ward: str = Field(default="Homa Bay Central", min_length=1, max_length=100)
 
 
 class DecisionRequest(BaseModel):
@@ -85,11 +93,6 @@ class PlotOnboardingRequest(BaseModel):
     current_growth_stage: str
     acreage: float
     kijanibox_sensor_id: str = ""
-
-
-@app.on_event("startup")
-def startup() -> None:
-    initialize()
 
 
 @app.get("/api/health")
