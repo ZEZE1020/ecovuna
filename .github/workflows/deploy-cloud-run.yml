@@ -49,6 +49,12 @@ jobs:
         with:
           project_id: ${{ vars.GCP_PROJECT_ID }}
 
+      - name: Configure Cloud Run runtime identity
+        run: |
+          PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" \
+            --format='value(projectNumber)')
+          echo "RUNTIME_SERVICE_ACCOUNT=${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" >> "$GITHUB_ENV"
+
       - name: Build and push API image
         env:
           IMAGE: ghcr.io/${{ env.IMAGE_NAMESPACE }}/ecovuna-api:${{ env.RELEASE_TAG }}
@@ -69,6 +75,7 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --port 8000 \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
             --memory 512Mi \
             --min-instances 0 \
             --max-instances 2 \
@@ -99,6 +106,7 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --port 3000 \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
             --memory 512Mi \
             --min-instances 0 \
             --max-instances 2

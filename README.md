@@ -137,6 +137,27 @@ account needs permission to deploy Cloud Run services, including permission to
 act as the runtime service account selected by Cloud Run. The GitHub Actions
 identity should be restricted to this repository and its `main` branch.
 
+The workflow explicitly uses the project's default compute runtime identity:
+`PROJECT_NUMBER-compute@developer.gserviceaccount.com`. Grant the deployer
+permission to act as that identity:
+
+```bash
+PROJECT_NUMBER=$(gcloud projects describe "$GCP_PROJECT_ID" \
+  --format='value(projectNumber)')
+RUNTIME_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+DEPLOY_SA="ecovuna-deployer@$GCP_PROJECT_ID.iam.gserviceaccount.com"
+
+gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
+  --project="$GCP_PROJECT_ID" \
+  --role="roles/iam.serviceAccountUser" \
+  --member="serviceAccount:$DEPLOY_SA"
+```
+
+If the default compute service account does not exist, enable the Compute
+Engine API first. For stronger isolation later, replace it with a dedicated
+runtime service account and grant the same narrowly scoped binding to that
+account.
+
 Images are published to the repository's GitHub Container Registry packages:
 `ghcr.io/zeze1020/ecovuna-api` and `ghcr.io/zeze1020/ecovuna-web`. Make both
 packages public before the first Cloud Run deployment, because Cloud Run pulls
