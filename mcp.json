@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ecovuna-telemetry": {
+      "command": "python",
+      "args": ["-m", "backend.mcp_server"]
+    },
+    "kalro-reference-fetch": {
+      "command": "python",
+      "args": ["-m", "mcp_server_fetch"]
+    }
+  }
+}

@@ -1,0 +1,1 @@
+"""Ecovuna Desk backend package."""
