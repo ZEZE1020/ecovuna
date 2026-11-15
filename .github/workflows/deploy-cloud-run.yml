@@ -118,6 +118,10 @@ jobs:
             --format='value(status.url)')
           curl --fail --retry 5 --retry-delay 5 "$API_URL/api/health"
           curl --fail --retry 5 --retry-delay 5 "$WEB_URL"
+          CSS_PATH=$(curl --fail --retry 5 --retry-delay 5 "$WEB_URL" \
+            | sed -n 's/.*href="\([^"]*\.css\)".*/\1/p' | head -n 1)
+          test -n "$CSS_PATH"
+          curl --fail --retry 5 --retry-delay 5 "$WEB_URL$CSS_PATH" >/dev/null
           echo "API: $API_URL"
           echo "Web service: $WEB_URL"
           echo "Custom domain mapping is configured separately for Cloudflare DNS."

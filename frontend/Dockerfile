@@ -11,5 +11,6 @@ FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/.next/standalone ./
+COPY --from=build /app/.next/static ./.next/static
 EXPOSE 3000
 CMD ["sh", "-c", "node server.js -p ${PORT:-3000}"]
