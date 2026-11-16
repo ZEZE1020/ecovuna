@@ -23,8 +23,10 @@ class TriageRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=1000)
-    ward: str = Field(default="Homa Bay Central", min_length=1, max_length=100)
+    ward: str | None = Field(default=None, min_length=1, max_length=100)
     session_id: str | None = None
+    crop: str | None = None
+    season: str | None = None
 
 
 class DecisionRequest(BaseModel):
@@ -205,11 +207,37 @@ class AgentRunResponse(BaseModel):
     error: str | None = None
 
 
+class ConversationContextResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    session_id: str
+    ward: str
+    crop: str
+    season: str
+    telemetry_freshness: str
+    prior_run_ids: list[str] = Field(default_factory=list)
+    unresolved_questions: list[str] = Field(default_factory=list)
+
+
+class ConversationSectionsResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    observed_facts: list[str] = Field(default_factory=list)
+    interpretation: str
+    uncertainty: str
+    recommendation: str
+    approval_state: str
+    citations: dict[str, Any] = Field(default_factory=dict)
+
+
 class ChatResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
+    session_id: str | None = None
     message: str
     question: str
+    context: ConversationContextResponse | None = None
+    sections: ConversationSectionsResponse | None = None
     run: AgentRunResponse
 
 

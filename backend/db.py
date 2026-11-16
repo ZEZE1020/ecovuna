@@ -80,6 +80,19 @@ CREATE TABLE IF NOT EXISTS policy_decisions (
   error_code TEXT NOT NULL, reason TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS conversation_sessions (
+  session_id TEXT PRIMARY KEY, ward TEXT NOT NULL,
+  crop TEXT NOT NULL, season TEXT NOT NULL,
+  telemetry_freshness TEXT NOT NULL, prior_run_ids_json TEXT NOT NULL,
+  unresolved_questions_json TEXT NOT NULL, created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS conversation_turns (
+  turn_id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES conversation_sessions,
+  role TEXT NOT NULL, message TEXT NOT NULL,
+  run_id TEXT, sections_json TEXT NOT NULL,
+  citations_json TEXT NOT NULL, created_at TEXT NOT NULL
+);
 """
 
 
