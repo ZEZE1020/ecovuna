@@ -26,6 +26,6 @@ def summary(trials: int = 1) -> dict[str, Any]:
         "interpretation": {
             "data_grounding": "Measured by telemetry, KALRO citation, document/web verification, and offline fallback cases.",
             "agent_usefulness": "Measured across 9 scenario families: germination drought, flowering drought, floods/pests, missing evidence, approval policy, prices/vouchers, stale data, follow-ups, and conflicting signals.",
-            "model_status": "Baseline deterministic planner and open-weights (qwen2.5:7b) runs are reported separately with latency and token/cost distributions.",
+            "model_status": "The deterministic planner baseline and open-weights (qwen2.5:7b) runs are reported separately with latency and token/cost distributions.",
         },
     }
