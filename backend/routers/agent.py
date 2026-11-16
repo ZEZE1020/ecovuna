@@ -24,6 +24,7 @@ from ..foundation import get_agent_foundation
 from ..kijanispace import KijaniSpaceError
 from ..multilingual import generate_advisory_variants
 from ..policy import TOOL_POLICIES, execute_consequential_action
+from ..research_connectors import fetch_official_web_source, ingest_document_source
 from ..state_graph import load_run_state
 
 router = APIRouter(tags=["agent"])
@@ -168,4 +169,35 @@ def get_run_output_variants(
         "approval_status": advisory.get("status"),
         "approved_by_wao": approved_by if advisory.get("status") == "APPROVED_DISPATCHED" else None,
         "variants": variants,
+    }
+
+
+@router.post("/api/agent/research/verify")
+def verify_research_sources(payload: dict[str, object]) -> dict[str, object]:
+    """Inspect and normalize document and allowlisted official web sources (#16)."""
+    run_id = str(payload.get("run_id") or "RESEARCH-API")
+    required = [
+        str(item)
+        for item in (payload.get("required_citations") or ["KALRO-HB-2026-01", "KMD-2026-10-14"])  # type: ignore[union-attr]
+    ]
+    doc = ingest_document_source(
+        document_id=str(payload.get("document_id") or "DOC-KALRO-HB-2026"),
+        title=str(payload.get("document_title") or "Homa Bay Agronomy Bulletin 2026"),
+        publisher=str(payload.get("document_publisher") or "KALRO Homa Bay Research Centre"),
+        content=str(payload["document_content"]) if payload.get("document_content") is not None else None,
+        required_citations=required,
+        run_id=run_id,
+    )
+    web = fetch_official_web_source(
+        str(payload.get("web_url") or "https://www.meteo.go.ke/bulletins/KMD-2026-10-14"),
+        required_citations=required,
+        simulate_failure=bool(payload.get("simulate_web_failure", False)),
+        custom_content=str(payload["web_content"]) if payload.get("web_content") is not None else None,
+        run_id=run_id,
+    )
+    return {
+        "document_source": doc,
+        "web_source": web,
+        "sources": [doc, web],
+        "can_support_staging": bool(doc["citation_matched"] and web["citation_matched"]),
     }
