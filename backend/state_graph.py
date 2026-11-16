@@ -290,6 +290,7 @@ def _recover_node(state: AgentState) -> AgentState:
 
 
 def _citation_self_check(state: AgentState) -> AgentState:
+    from .mcp_client import BORROWED_SERVER_ID, call_borrowed_reference_server
     from .mcp_server import fetch_kalro_guidelines
     from .safety import detect_signal_conflicts
 
@@ -312,6 +313,21 @@ def _citation_self_check(state: AgentState) -> AgentState:
     )
     _trace(state, "citation_self_check", "fetch_kalro_guidelines", guideline)
     state["guideline"] = guideline
+
+    borrowed_ref = call_borrowed_reference_server(
+        "file://data/kalro_bulletins/homabay_agronomy_2026.md",
+        run_id=state["run_id"],
+        rule_id=guideline["rule_id"],
+        simulate_unavailable="borrowed_offline" in scenario,
+    )
+    _trace(
+        state,
+        "citation_self_check",
+        "fetch",
+        borrowed_ref,
+        server=BORROWED_SERVER_ID,
+    )
+    state.setdefault("evidence", {})["borrowed_reference"] = borrowed_ref
 
     pre_existing_conflicts = list(state.get("conflicts") or [])
     safety_report = detect_signal_conflicts(
@@ -530,12 +546,14 @@ def _trace(
     node: str,
     tool: str,
     output: dict[str, Any],
+    *,
+    server: str = "Ecovuna_Telemetry",
 ) -> None:
     state.setdefault("execution_trace", []).append(
         {
             "node": node,
             "tool": tool,
-            "server": "Ecovuna_Telemetry",
+            "server": server,
             "latency_ms": 1,
             "output": output,
         }
