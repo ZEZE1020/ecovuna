@@ -1,48 +1,63 @@
-"""MCP server registry and recent tool activity router."""
+"""MCP server registry, runtime discovery, and tool invocation router (#11)."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from typing import Any
 
-from ..contracts import (
-    McpActivityEntryResponse,
-    McpRegistryResponse,
-    McpServerStatusResponse,
-)
-from ..db import connect
+from fastapi import APIRouter
+from pydantic import BaseModel, Field
+
+from ..contracts import McpRegistryResponse
+from ..errors import EcovunaError, InvalidRequestError, NotFoundError
+from ..mcp_client import call_mcp_tool, discover_mcp_runtime
+from ..mcp_server import list_registered_mcp_tools
 
 router = APIRouter(tags=["mcp"])
 
 
+class McpToolCallRequest(BaseModel):
+    server_id: str = Field(default="ecovuna-telemetry", min_length=1)
+    tool_name: str = Field(min_length=1)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    run_id: str | None = None
+
+
 @router.get("/api/mcp/registry", response_model=McpRegistryResponse)
 def mcp_registry() -> McpRegistryResponse:
-    """Expose the configured MCP servers and recent tool activity."""
-    servers = [
-        McpServerStatusResponse(
-            id="ecovuna-telemetry",
-            name="Ecovuna Telemetry",
-            transport="local process",
-            tools=[
-                "fetch_kijanibox_telemetry",
-                "fetch_open_meteo_context",
-                "fetch_kalro_guidelines",
-                "stage_advisory_for_wao_approval",
-            ],
-            status="ready",
-        ),
-        McpServerStatusResponse(
-            id="kalro-reference-fetch",
-            name="KALRO Reference Fetch",
-            transport="MCP subprocess",
-            tools=["fetch"],
-            status="configured",
-        ),
-    ]
-    with connect() as db:
-        activity = [
-            McpActivityEntryResponse.model_validate(dict(row))
-            for row in db.execute(
-                "SELECT server, tool_name, timestamp FROM mcp_audit_log ORDER BY id DESC LIMIT 10"
-            )
-        ]
-    return McpRegistryResponse(servers=servers, recent_activity=activity)
+    """Expose runtime-discovered MCP servers, capabilities, and recent tool activity."""
+    return McpRegistryResponse.model_validate(discover_mcp_runtime())
+
+
+@router.get("/api/mcp/tools")
+def mcp_tools() -> dict[str, Any]:
+    """List registered MCP tools, descriptions, and JSON input schemas."""
+    runtime = discover_mcp_runtime()
+    all_schemas: list[dict[str, Any]] = []
+    for server in runtime["servers"]:
+        all_schemas.extend(server.get("tool_schemas", []))
+    return {
+        "tools": all_schemas or list_registered_mcp_tools(),
+    }
+
+
+@router.post("/api/mcp/call")
+def mcp_call(request: McpToolCallRequest) -> dict[str, Any]:
+    """Invoke a project-owned or borrowed MCP tool through the runtime boundary."""
+    try:
+        output = call_mcp_tool(
+            request.server_id,
+            request.tool_name,
+            request.arguments,
+            run_id=request.run_id,
+        )
+    except EcovunaError:
+        raise
+    except KeyError as exc:
+        raise NotFoundError(str(exc), error_code="MCP_TOOL_NOT_FOUND") from exc
+    except (ValueError, TypeError) as exc:
+        raise InvalidRequestError(str(exc), error_code="MCP_INVALID_ARGUMENTS") from exc
+    return {
+        "server_id": request.server_id,
+        "tool_name": request.tool_name,
+        "output": output,
+    }
