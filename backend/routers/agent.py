@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, Header
+from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from ..agent import decide, triage
 from ..artifacts_repository import repository as artifact_repo
@@ -28,6 +28,7 @@ from ..multilingual import generate_advisory_variants
 from ..policy import TOOL_POLICIES, execute_consequential_action
 from ..research_connectors import fetch_official_web_source, ingest_document_source
 from ..state_graph import load_run_state
+from ..streaming import format_sse_stream, resolve_run_state
 
 router = APIRouter(tags=["agent"])
 
@@ -159,6 +160,40 @@ def download_artifact(artifact_id: str) -> PlainTextResponse:
 def verify_artifact_dispatch(artifact_id: str) -> dict[str, object]:
     """Verify that an artifact has WAO approval before it can be treated as dispatched (#17)."""
     return artifact_repo.assert_artifact_dispatchable(artifact_id)
+
+
+@router.get("/api/agent/runs/{run_or_session_id}")
+def get_run_state_snapshot(run_or_session_id: str) -> dict[str, object]:
+    """Return the current or final run state for refresh and reconnection recovery (#15)."""
+    run_id, session_id, state = resolve_run_state(run_or_session_id)
+    return {
+        "run_id": run_id,
+        "session_id": session_id,
+        "state": state,
+    }
+
+
+@router.get("/api/agent/stream/{run_or_session_id}")
+def stream_agent_progress(
+    run_or_session_id: str,
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    after_sequence: int | None = None,
+) -> StreamingResponse:
+    """Stream versioned SSE progress events keyed by run_id or session_id with reconnect support (#15)."""
+    effective_last_id = (
+        str(after_sequence) if after_sequence is not None else last_event_id
+    )
+    # Validate existence eagerly so 404 is returned cleanly before streaming
+    resolve_run_state(run_or_session_id)
+    return StreamingResponse(
+        format_sse_stream(run_or_session_id, last_event_id=effective_last_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Stream-Version": "1.0",
+        },
+    )
 
 
 @router.post("/api/agent/decide", response_model=DecisionResponse)
