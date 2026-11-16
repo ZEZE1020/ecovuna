@@ -66,6 +66,12 @@ CREATE TABLE IF NOT EXISTS farm_assignments (
   status TEXT NOT NULL DEFAULT 'RECOMMENDED', reason_json TEXT NOT NULL,
   created_at TEXT NOT NULL, officer_id TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS agent_runs (
+  run_id TEXT PRIMARY KEY, ward TEXT NOT NULL,
+  status TEXT NOT NULL, current_node TEXT NOT NULL,
+  state_json TEXT NOT NULL, created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 """
 
 
