@@ -26,6 +26,7 @@ from ..foundation import get_agent_foundation
 from ..kijanispace import KijaniSpaceError
 from ..multilingual import generate_advisory_variants
 from ..policy import TOOL_POLICIES, execute_consequential_action
+from ..proactive import build_daily_brief, convert_brief_item_to_run
 from ..research_connectors import fetch_official_web_source, ingest_document_source
 from ..state_graph import load_run_state
 from ..streaming import format_sse_stream, resolve_run_state
@@ -301,3 +302,38 @@ def verify_research_sources(payload: dict[str, object]) -> dict[str, object]:
         "sources": [doc, web],
         "can_support_staging": bool(doc["citation_matched"] and web["citation_matched"]),
     }
+
+
+@router.get("/api/agent/brief")
+def get_daily_brief(
+    ward: str | None = None,
+    question: str | None = None,
+) -> dict[str, object]:
+    """Return the read-only daily brief and ranked follow-up queue with citations (#8)."""
+    return build_daily_brief(ward=ward, question=question)
+
+
+@router.post("/api/agent/brief/continue")
+def continue_brief_item(payload: dict[str, object]) -> dict[str, object]:
+    """Convert a ranked daily brief item into an inspectable, approval-gated agent run (#8)."""
+    item_id = str(payload.get("item_id") or "").strip()
+    if not item_id:
+        raise InvalidRequestError(
+            "item_id is required to continue a daily brief item.",
+            error_code="MISSING_BRIEF_ITEM_ID",
+        )
+    question = (
+        str(payload["question"])
+        if payload.get("question") is not None
+        else None
+    )
+    session_id = (
+        str(payload["session_id"])
+        if payload.get("session_id") is not None
+        else None
+    )
+    return convert_brief_item_to_run(
+        item_id=item_id,
+        question=question,
+        session_id=session_id,
+    )
