@@ -25,6 +25,7 @@ from ..evals.summary import summary as evaluation_summary
 from ..foundation import get_agent_foundation
 from ..kijanispace import KijaniSpaceError
 from ..multilingual import generate_advisory_variants
+from ..open_weights import run_open_weights_task
 from ..policy import TOOL_POLICIES, execute_consequential_action
 from ..proactive import build_daily_brief, convert_brief_item_to_run
 from ..research_connectors import fetch_official_web_source, ingest_document_source
@@ -336,4 +337,32 @@ def continue_brief_item(payload: dict[str, object]) -> dict[str, object]:
         item_id=item_id,
         question=question,
         session_id=session_id,
+    )
+
+
+@router.post("/api/agent/model-task")
+def execute_open_weights_task(payload: dict[str, object]) -> dict[str, object]:
+    """Run one complete model-backed Ecovuna task via open-weights Ollama with offline fallback (#10)."""
+    ward = str(payload.get("ward") or "Homa Bay Central").strip()
+    prompt = str(
+        payload.get("prompt")
+        or "Assess soil moisture and stage a grounded maize advisory if safe."
+    ).strip()
+    model = (
+        str(payload["model"])
+        if payload.get("model") is not None
+        else None
+    )
+    force_unavailable = bool(payload.get("force_unavailable", False))
+    simulated = (
+        dict(payload["simulated_model_response"])  # type: ignore[arg-type]
+        if isinstance(payload.get("simulated_model_response"), dict)
+        else None
+    )
+    return run_open_weights_task(
+        ward=ward,
+        prompt=prompt,
+        model=model,
+        simulated_model_response=simulated,
+        force_unavailable=force_unavailable,
     )
