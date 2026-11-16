@@ -20,6 +20,7 @@ from ..contracts import (
     TriageRequest,
 )
 from ..conversations import get_conversation_session, run_conversation_turn
+from ..demo import run_reproducible_demo
 from ..errors import EcovunaError, InvalidRequestError, NotFoundError, ProviderUnavailableError
 from ..evals.summary import summary as evaluation_summary
 from ..foundation import get_agent_foundation
@@ -366,3 +367,9 @@ def execute_open_weights_task(payload: dict[str, object]) -> dict[str, object]:
         simulated_model_response=simulated,
         force_unavailable=force_unavailable,
     )
+
+
+@router.post("/api/agent/demo")
+def execute_reproducible_demo() -> dict[str, object]:
+    """Run the reproducible end-to-end agent demonstration covering success, recovery, and safe failure (#19)."""
+    return run_reproducible_demo()

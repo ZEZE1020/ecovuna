@@ -1,7 +1,7 @@
 .SHELLFLAGS := -eu -o pipefail -c
 SHELL := /bin/bash
 
-.PHONY: setup ingest dev telemetry-up telemetry-down test model-task clean
+.PHONY: setup ingest dev telemetry-up telemetry-down test model-task demo clean
 
 UV ?= uv
 VENV ?= .venv
@@ -63,6 +63,9 @@ test: setup
 
 model-task: setup
 	$(VENV_PYTHON) -c "import json; from backend.open_weights import run_open_weights_task; r = run_open_weights_task(); print(json.dumps({'run_id': r['run_id'], 'status': r['status'], 'model_execution': r['model_execution']}, indent=2))"
+
+demo: setup
+	$(VENV_PYTHON) -m backend.demo
 
 clean:
 	rm -rf $(VENV)
