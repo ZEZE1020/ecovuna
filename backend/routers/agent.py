@@ -67,13 +67,26 @@ def agent_chat(request: ChatRequest) -> ChatResponse:
     if not request.message.strip():
         raise InvalidRequestError("message is required.", error_code="EMPTY_MESSAGE")
     normalized = request.message.lower()
-    scenario = (
-        "flash flood waterlogging"
-        if "flood" in normalized or "water" in normalized
-        else "flowering maize dry spell"
-        if "flower" in normalized
-        else "sudden dry spell"
-    )
+    if any(
+        token in normalized
+        for token in (
+            "microclimate",
+            "divergen",
+            "lake-shore",
+            "hilltop",
+            "stale_weather",
+            "missing_ownership",
+            "contradictory",
+            "conflict",
+        )
+    ):
+        scenario = normalized
+    elif "flood" in normalized or "water" in normalized:
+        scenario = "flash flood waterlogging"
+    elif "flower" in normalized:
+        scenario = "flowering maize dry spell"
+    else:
+        scenario = "sudden dry spell"
     try:
         result = triage(request.ward.strip(), scenario)
     except EcovunaError:
@@ -85,8 +98,20 @@ def agent_chat(request: ChatRequest) -> ChatResponse:
         ) from exc
     except (ValueError, KeyError) as exc:
         raise InvalidRequestError(str(exc)) from exc
+
+    safety = result.get("safety_decision") or {}
+    if result.get("conflicts") or result.get("status") in {
+        "PAUSED_FOR_CONFLICT_VERIFICATION",
+        "SAFE_TERMINAL_VERIFICATION_REQUIRED",
+    }:
+        message = (
+            safety.get("clarification_question")
+            or "Conflicting or insufficient evidence detected; field verification is required before staging an advisory."
+        )
+    else:
+        message = "I found grounded evidence and prepared an advisory for your review."
     return ChatResponse(
-        message="I found grounded evidence and prepared an advisory for your review.",
+        message=message,
         question=request.message,
         run=AgentRunResponse.model_validate(result),
     )
