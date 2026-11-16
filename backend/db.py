@@ -93,6 +93,34 @@ CREATE TABLE IF NOT EXISTS conversation_turns (
   run_id TEXT, sections_json TEXT NOT NULL,
   citations_json TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS field_artifacts (
+  artifact_id TEXT PRIMARY KEY,
+  artifact_group_id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  run_id TEXT NOT NULL,
+  session_id TEXT,
+  ward TEXT NOT NULL,
+  artifact_type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  content_text TEXT NOT NULL,
+  metadata_json TEXT NOT NULL,
+  citations_json TEXT NOT NULL,
+  approval_status TEXT NOT NULL,
+  approved_by_wao TEXT,
+  dispatched INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS run_tool_events (
+  event_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  session_id TEXT,
+  sequence_no INTEGER NOT NULL,
+  node TEXT NOT NULL,
+  server TEXT NOT NULL,
+  tool_name TEXT NOT NULL,
+  output_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 """
 
 

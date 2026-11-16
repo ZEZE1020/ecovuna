@@ -7,6 +7,7 @@ import time
 import uuid
 from typing import Any
 
+from .artifacts_repository import repository as artifact_repo
 from .db import connect
 from .foundation import get_agent_foundation
 from .policy import enforce_decision_policy
@@ -47,6 +48,13 @@ def triage(ward: str, scenario_override: str = "") -> AgentState:
         "duration_ms": round((time.perf_counter() - started) * 1000, 2),
     }
     save_run_state(final_state)
+    artifact_repo.record_immutable_tool_events(
+        run_id=final_state["run_id"],
+        execution_trace=final_state.get("execution_trace", []),
+    )
+    final_state["artifacts"] = artifact_repo.generate_and_persist_artifacts(
+        run=final_state
+    )
     return final_state
 
 
@@ -76,6 +84,14 @@ def decide(
         notes=notes,
         approval_token=checked["approval_token"],
         policy_decision=checked["policy_decision"],
+    )
+    artifact_repo.record_immutable_tool_events(
+        run_id=run_id,
+        execution_trace=resumed_state.get("execution_trace", []),
+    )
+    updated_artifacts = artifact_repo.generate_and_persist_artifacts(
+        run=resumed_state,
+        approved_by_wao=officer if approved else None,
     )
     status = resumed_state["status"]
     dispatched = bool(approved)
@@ -117,4 +133,5 @@ def decide(
         "advisory_id": checked["advisory_id"],
         "approval_token": checked["approval_token"],
         "policy_decision": checked["policy_decision"],
+        "artifacts": updated_artifacts,
     }
