@@ -524,8 +524,15 @@ def resume_run_decision(
             "decided_at": decision_payload["decided_at"],
         }
         if isinstance(current.get("advisory"), dict):
+            from .multilingual import generate_advisory_variants
+
             current["advisory"]["status"] = status
             current["advisory"]["dispatched"] = dispatched
+            current["advisory"]["approved_by_wao"] = wao_officer_name if approved else None
+            current["advisory"]["output_variants"] = generate_advisory_variants(
+                current["advisory"],
+                approved_by_wao=wao_officer_name if approved else None,
+            )
         _trace(current, "human_approval", "wao_decision", decision_payload)
         current["_next_transition"] = "approved" if approved else "rejected"
         return current

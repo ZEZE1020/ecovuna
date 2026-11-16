@@ -9,6 +9,7 @@ from typing import Any
 from .db import connect, initialize, insert_json
 from .firestore_sync import sync_advisory_state
 from .kijanispace import KijaniSpaceError, fetch_land, normalize_land
+from .multilingual import generate_advisory_variants
 from .policy import enforce_stage_policy, mint_approval_token
 
 SERVER_ID = "ecovuna-telemetry"
@@ -273,6 +274,7 @@ def stage_advisory_for_wao_approval(
         "policy_decision": policy_check,
         "gate_message": "Waiting for named Ward Agricultural Officer sign-off",
     }
+    output["output_variants"] = generate_advisory_variants(output)
     _audit(run_id, "stage_advisory_for_wao_approval", {"ward": ward}, output)
     sync_advisory_state(output)
     return output

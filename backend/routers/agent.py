@@ -18,11 +18,13 @@ from ..contracts import (
     TriageRequest,
 )
 from ..conversations import get_conversation_session, run_conversation_turn
-from ..errors import EcovunaError, InvalidRequestError, ProviderUnavailableError
+from ..errors import EcovunaError, InvalidRequestError, NotFoundError, ProviderUnavailableError
 from ..evals.summary import summary as evaluation_summary
 from ..foundation import get_agent_foundation
 from ..kijanispace import KijaniSpaceError
+from ..multilingual import generate_advisory_variants
 from ..policy import TOOL_POLICIES, execute_consequential_action
+from ..state_graph import load_run_state
 
 router = APIRouter(tags=["agent"])
 
@@ -133,3 +135,37 @@ def run_consequential_action(
         channel="api",
     )
     return ConsequentialActionResponse.model_validate(result)
+
+
+@router.get("/api/agent/runs/{run_id}/variants")
+def get_run_output_variants(
+    run_id: str,
+    language: str | None = None,
+    channel: str | None = None,
+) -> dict[str, object]:
+    """Return multilingual farmer-ready output variants for a staged or approved run (#6)."""
+    state = load_run_state(run_id)
+    if state is None or not isinstance(state.get("advisory"), dict):
+        raise NotFoundError(
+            f"Run '{run_id}' does not have a staged advisory.",
+            error_code="ADVISORY_NOT_FOUND",
+        )
+    advisory = state["advisory"]
+    approved_by = (state.get("decision") or {}).get("wao_officer_name") or advisory.get(
+        "approved_by_wao"
+    )
+    langs = (language,) if language else ("en", "sw", "luo")
+    chans = (channel,) if channel else ("sms", "ussd", "whatsapp", "voice")
+    variants = generate_advisory_variants(
+        advisory,
+        approved_by_wao=approved_by,
+        requested_languages=langs,
+        requested_channels=chans,
+    )
+    return {
+        "run_id": run_id,
+        "advisory_id": advisory.get("advisory_id"),
+        "approval_status": advisory.get("status"),
+        "approved_by_wao": approved_by if advisory.get("status") == "APPROVED_DISPATCHED" else None,
+        "variants": variants,
+    }
