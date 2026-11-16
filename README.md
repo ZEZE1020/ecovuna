@@ -176,3 +176,4 @@ The main gaps are deliberately tracked in GitHub issues:
 Contributions should preserve three invariants: evidence must be inspectable,
 unsafe actions must stop at a named human approval gate, and offline fallback
 must remain usable.
+
