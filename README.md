@@ -88,6 +88,33 @@ uv run --project backend python -m backend.evals.run_evals --trials 3
 Read the public evaluation results in [`EVALS.md`](./EVALS.md) and the system
 shape in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
+## Reproducible live agent demonstration
+
+Run the complete end-to-end demonstration (success path + provider timeout recovery + conflicting-signal safe failure) from a single command:
+
+```bash
+make demo
+```
+
+Or output the machine-readable trace, citations, artifacts, and WAO approval record as JSON:
+
+```bash
+uv run --project backend python -m backend.demo --json
+```
+
+What the demonstration executes and verifies on synthetic Homa Bay fixtures:
+
+1. **Success path (`Homa Bay Central` germination maize dry spell):**
+   - Formulates an explicit state-graph plan (`start -> plan -> plan_and_fetch -> citation_self_check -> stage_write_action -> human_approval`).
+   - Invokes project-owned (`Ecovuna_Telemetry`), borrowed (`kalro-reference-fetch`), and document/web research (`ecovuna-research-connector`) MCP tools.
+   - Extracts source excerpts from `DOC-KALRO-HB-2026` and `KMD-2026-10-14` with SHA-256 checksums.
+   - Generates multilingual (`en`, `sw`, `luo`) SMS, USSD, WhatsApp, and voice variants plus versioned `field_brief`, `sms`, `ussd`, and `visit_list` artifacts.
+   - Records named Ward Agricultural Officer approval (`Godfrey Ogembo — WAO-KE-043`) and verifies the append-only audit trail.
+2. **Timeout recovery path (`simulate_timeout`):**
+   - Simulates an upstream telemetry timeout and transitions cleanly through the `recover` node using cached ward readings.
+3. **Conflicting-signal safe failure path (`Suba South` lake-shore vs. hilltop divergence):**
+   - Detects a 23% sensor moisture spread (`MICROCLIMATE_DIVERGENCE`), lowers confidence to `0.22`, halts staging (`PAUSED_FOR_CONFLICT_VERIFICATION`), and asks a clarifying verification question rather than dispatching an ungrounded advisory.
+
 ## Local tracing
 
 Jaeger is a local development aid, not part of the production web service:
