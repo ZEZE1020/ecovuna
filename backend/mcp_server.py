@@ -13,6 +13,7 @@ from typing import Any
 from .db import connect, initialize, insert_json
 from .firestore_sync import sync_advisory_state
 from .kijanispace import KijaniSpaceError, fetch_land, normalize_land
+from .policy import enforce_stage_policy, mint_approval_token
 
 
 def _audit(run_id: str, tool_name: str, inputs: dict[str, Any], output: dict[str, Any]) -> None:
@@ -86,10 +87,16 @@ def stage_advisory_for_wao_approval(
     run_id: str, ward: str, anomaly_type: str, target_growth_stage: str,
     plot_ids: list[str], sms_swahili: str, sms_english: str,
     voucher_code: str, voucher_total_kes: float, citations: dict[str, Any],
+    channel: str = "agent",
 ) -> dict[str, Any]:
-    if not plot_ids or not citations.get("sensor_ids") or not citations.get("plot_ids"):
-        raise ValueError("Advisory must include plot_ids and sensor_ids before staging")
+    policy_check = enforce_stage_policy(
+        run_id=run_id,
+        plot_ids=plot_ids,
+        citations=citations,
+        channel=channel,
+    )
     advisory_id = f"ADV-{uuid.uuid4().hex[:10].upper()}"
+    approval_token = mint_approval_token(run_id, advisory_id)
     per_farmer = voucher_total_kes / len(plot_ids)
     with connect() as db:
         insert_json(db, "staged_advisories", {
@@ -117,6 +124,9 @@ def stage_advisory_for_wao_approval(
         "per_farmer_kes": per_farmer,
         "citations": citations,
         "status": "PENDING_WAO_APPROVAL",
+        "dispatched": False,
+        "approval_token": approval_token,
+        "policy_decision": policy_check,
         "gate_message": "Waiting for named Ward Agricultural Officer sign-off",
     }
     _audit(run_id, "stage_advisory_for_wao_approval", {"ward": ward}, output)

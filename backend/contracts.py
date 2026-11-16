@@ -28,11 +28,31 @@ class ChatRequest(BaseModel):
 
 
 class DecisionRequest(BaseModel):
-    run_id: str = Field(min_length=1)
+    run_id: str
     approved: bool
-    wao_officer_name: str = Field(min_length=1)
+    wao_officer_name: str
     notes: str = ""
     approval_token: str | None = None
+
+
+class ConsequentialActionRequest(BaseModel):
+    tool_name: str
+    run_id: str
+    wao_officer_name: str
+    approval_token: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConsequentialActionResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    run_id: str
+    tool_name: str
+    status: str
+    wao_officer_name: str
+    approval_token: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    policy_decision: dict[str, Any] = Field(default_factory=dict)
 
 
 class RecommendationRequest(BaseModel):

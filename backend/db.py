@@ -72,6 +72,14 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   state_json TEXT NOT NULL, created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS policy_decisions (
+  decision_id TEXT PRIMARY KEY, run_id TEXT NOT NULL,
+  tool_name TEXT NOT NULL, category TEXT NOT NULL,
+  channel TEXT NOT NULL, officer_id TEXT NOT NULL,
+  approval_token TEXT NOT NULL, allowed INTEGER NOT NULL,
+  error_code TEXT NOT NULL, reason TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 """
 
 

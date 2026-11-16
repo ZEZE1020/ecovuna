@@ -10,6 +10,8 @@ from ..contracts import (
     AgentRunResponse,
     ChatRequest,
     ChatResponse,
+    ConsequentialActionRequest,
+    ConsequentialActionResponse,
     DecisionRequest,
     DecisionResponse,
     EvaluationSummaryResponse,
@@ -19,6 +21,7 @@ from ..errors import EcovunaError, InvalidRequestError, ProviderUnavailableError
 from ..evals.summary import summary as evaluation_summary
 from ..foundation import get_agent_foundation
 from ..kijanispace import KijaniSpaceError
+from ..policy import TOOL_POLICIES, execute_consequential_action
 
 router = APIRouter(tags=["agent"])
 
@@ -97,9 +100,35 @@ def make_decision(request: DecisionRequest) -> DecisionResponse:
             request.approved,
             request.wao_officer_name,
             request.notes,
+            approval_token=request.approval_token,
+            channel="api",
         )
     except EcovunaError:
         raise
     except ValueError as exc:
         raise InvalidRequestError(str(exc)) from exc
     return DecisionResponse.model_validate(result)
+
+
+@router.get("/api/agent/policies")
+def list_tool_policies() -> dict[str, object]:
+    """Expose server-side tool categories and approval policy rules."""
+    return {
+        "policies": [rule.as_dict() for rule in TOOL_POLICIES.values()],
+    }
+
+
+@router.post("/api/agent/actions", response_model=ConsequentialActionResponse)
+def run_consequential_action(
+    request: ConsequentialActionRequest,
+) -> ConsequentialActionResponse:
+    """Execute a consequential external action only after policy and token verification."""
+    result = execute_consequential_action(
+        tool_name=request.tool_name,
+        run_id=request.run_id,
+        wao_officer_name=request.wao_officer_name,
+        approval_token=request.approval_token,
+        payload=request.payload,
+        channel="api",
+    )
+    return ConsequentialActionResponse.model_validate(result)
