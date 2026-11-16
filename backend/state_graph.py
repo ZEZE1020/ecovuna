@@ -24,6 +24,8 @@ class AgentState(TypedDict, total=False):
     telemetry: dict[str, Any]
     guideline: dict[str, Any]
     advisory: dict[str, Any] | None
+    safety_decision: dict[str, Any]
+    confidence: float
     execution_trace: list[dict[str, Any]]
     transitions: list[dict[str, str]]
     current_node: str
@@ -289,6 +291,7 @@ def _recover_node(state: AgentState) -> AgentState:
 
 def _citation_self_check(state: AgentState) -> AgentState:
     from .mcp_server import fetch_kalro_guidelines
+    from .safety import detect_signal_conflicts
 
     plan = state.get("plan", {})
     scenario = state.get("scenario_override", "").lower()
@@ -310,7 +313,24 @@ def _citation_self_check(state: AgentState) -> AgentState:
     _trace(state, "citation_self_check", "fetch_kalro_guidelines", guideline)
     state["guideline"] = guideline
 
-    if state.get("conflicts"):
+    pre_existing_conflicts = list(state.get("conflicts") or [])
+    safety_report = detect_signal_conflicts(
+        run_id=state["run_id"],
+        ward=state["ward"],
+        scenario_override=state.get("scenario_override", ""),
+        telemetry=state.get("telemetry", {}),
+        weather=(state.get("evidence") or {}).get("weather", {}),
+        guideline=guideline,
+    )
+    combined_conflicts = pre_existing_conflicts + safety_report["conflicts"]
+    state["conflicts"] = combined_conflicts
+    state["safety_decision"] = safety_report["safety_decision"]
+    state["confidence"] = (
+        0.18 if pre_existing_conflicts else safety_report["confidence"]
+    )
+    _trace(state, "citation_self_check", "detect_signal_conflicts", safety_report)
+
+    if combined_conflicts:
         state["_next_transition"] = "conflict_detected"
         return state
 
@@ -403,20 +423,28 @@ def _human_approval_gate(state: AgentState) -> AgentState:
 
 
 def _safe_terminal_node(state: AgentState) -> AgentState:
-    reason = (
-        "conflict_detected"
-        if state.get("conflicts")
-        else "missing_or_unverified_evidence"
-    )
+    has_conflicts = bool(state.get("conflicts"))
+    reason = "conflict_detected" if has_conflicts else "missing_or_unverified_evidence"
     state["status"] = (
         "PAUSED_FOR_CONFLICT_VERIFICATION"
-        if state.get("conflicts")
+        if has_conflicts
         else "SAFE_TERMINAL_VERIFICATION_REQUIRED"
     )
     state["advisory"] = None
+    safety_decision = state.get("safety_decision") or {}
     summary = {
         "status": state["status"],
         "reason": reason,
+        "confidence": state.get("confidence", 0.15),
+        "conflicts": state.get("conflicts", []),
+        "clarification_question": safety_decision.get(
+            "clarification_question",
+            "Clarify ward/plot evidence or schedule field verification before staging.",
+        ),
+        "recommended_verification": safety_decision.get(
+            "recommended_verification",
+            "Conduct field verification before staging any advisory.",
+        ),
         "action_required": "Clarify ward/plot evidence or schedule field verification before staging.",
     }
     _trace(state, "safe_terminal", "halt_ungrounded_staging", summary)
