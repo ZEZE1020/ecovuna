@@ -8,8 +8,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .agent import triage
+from .artifacts_repository import repository as artifact_repo
 from .db import connect, initialize
 from .errors import NotFoundError
+from .state_graph import load_run_state
 
 
 def _load_or_create_session(
@@ -386,13 +388,28 @@ def get_conversation_session(session_id: str) -> dict[str, Any]:
         item["sections"] = json.loads(item.pop("sections_json") or "{}")
         item["citations"] = json.loads(item.pop("citations_json") or "{}")
         turns.append(item)
+    prior_run_ids = json.loads(session_row["prior_run_ids_json"])
+    latest_run = load_run_state(prior_run_ids[-1]) if prior_run_ids else None
+    artifacts = (
+        artifact_repo.list_artifacts(run_id=prior_run_ids[-1])
+        if prior_run_ids
+        else []
+    )
+    tool_events = (
+        artifact_repo.list_tool_events(prior_run_ids[-1])
+        if prior_run_ids
+        else []
+    )
     return {
         "session_id": session_row["session_id"],
         "ward": session_row["ward"],
         "crop": session_row["crop"],
         "season": session_row["season"],
         "telemetry_freshness": session_row["telemetry_freshness"],
-        "prior_run_ids": json.loads(session_row["prior_run_ids_json"]),
+        "prior_run_ids": prior_run_ids,
         "unresolved_questions": json.loads(session_row["unresolved_questions_json"]),
         "turns": turns,
+        "latest_run": latest_run,
+        "artifacts": artifacts,
+        "tool_events": tool_events,
     }

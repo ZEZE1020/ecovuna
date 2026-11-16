@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+from fastapi.responses import PlainTextResponse
 
 from ..agent import decide, triage
+from ..artifacts_repository import repository as artifact_repo
 from ..contracts import (
     AgentFoundationResponse,
     AgentRunResponse,
@@ -90,10 +92,73 @@ def agent_chat(request: ChatRequest) -> ChatResponse:
     return ChatResponse.model_validate(turn)
 
 
+@router.get("/api/agent/sessions")
+def list_sessions(
+    ward: str | None = None,
+    date: str | None = None,
+    status: str | None = None,
+) -> dict[str, object]:
+    """List persisted conversation sessions filtered by ward, date, or run status (#17)."""
+    return {
+        "sessions": artifact_repo.list_sessions(
+            ward=ward,
+            date_prefix=date,
+            status=status,
+        )
+    }
+
+
 @router.get("/api/agent/sessions/{session_id}")
 def get_session(session_id: str) -> dict[str, object]:
     """Return persisted conversation session context and turn history."""
     return get_conversation_session(session_id)
+
+
+@router.get("/api/agent/artifacts")
+def list_artifacts(
+    run_id: str | None = None,
+    session_id: str | None = None,
+    ward: str | None = None,
+    approval_status: str | None = None,
+    latest_only: bool = True,
+) -> dict[str, object]:
+    """List versioned field artifacts with approval provenance (#17)."""
+    return {
+        "artifacts": artifact_repo.list_artifacts(
+            run_id=run_id,
+            session_id=session_id,
+            ward=ward,
+            approval_status=approval_status,
+            latest_only=latest_only,
+        )
+    }
+
+
+@router.get("/api/agent/artifacts/{artifact_id}")
+def get_artifact(artifact_id: str) -> dict[str, object]:
+    """Fetch a specific versioned field artifact for inspection or copying (#17)."""
+    return artifact_repo.get_artifact(artifact_id)
+
+
+@router.get("/api/agent/artifacts/{artifact_id}/download")
+def download_artifact(artifact_id: str) -> PlainTextResponse:
+    """Download a generated field brief, SMS, USSD, or visit-list artifact (#17)."""
+    art = artifact_repo.get_artifact(artifact_id)
+    filename = art["metadata"].get("download_filename", f"{artifact_id}.txt")
+    return PlainTextResponse(
+        content=art["content_text"],
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Approval-Status": str(art["approval_status"]),
+            "X-Dispatched": str(art["dispatched"]).lower(),
+        },
+    )
+
+
+@router.post("/api/agent/artifacts/{artifact_id}/verify-dispatch")
+def verify_artifact_dispatch(artifact_id: str) -> dict[str, object]:
+    """Verify that an artifact has WAO approval before it can be treated as dispatched (#17)."""
+    return artifact_repo.assert_artifact_dispatchable(artifact_id)
 
 
 @router.post("/api/agent/decide", response_model=DecisionResponse)
