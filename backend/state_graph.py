@@ -386,11 +386,14 @@ def _stage_write_action(state: AgentState) -> AgentState:
 
 
 def _human_approval_gate(state: AgentState) -> AgentState:
+    advisory = state.get("advisory") or {}
     approval_payload = {
         "status": "PENDING_WAO_APPROVAL",
         "gate": "WAO_HITL_GATE",
         "resumable": True,
-        "advisory_id": (state.get("advisory") or {}).get("advisory_id"),
+        "advisory_id": advisory.get("advisory_id"),
+        "approval_token": advisory.get("approval_token"),
+        "dispatched": False,
     }
     state["approval"] = approval_payload
     state["status"] = "PAUSED_AT_WAO_GATE"
@@ -438,16 +441,23 @@ def resume_run_decision(
     approved: bool,
     wao_officer_name: str,
     notes: str = "",
+    *,
+    approval_token: str = "",
+    policy_decision: dict[str, Any] | None = None,
 ) -> AgentState:
     """Resume a paused run at the human approval node without rerunning write steps."""
     state = load_run_state(run_id)
     status = "APPROVED_DISPATCHED" if approved else "REJECTED_FIELD_VISIT"
+    dispatched = bool(approved)
     decision_payload = {
         "run_id": run_id,
         "approved": approved,
         "status": status,
+        "dispatched": dispatched,
         "wao_officer_name": wao_officer_name,
+        "approval_token": approval_token,
         "notes": notes,
+        "policy_decision": policy_decision or {},
         "decided_at": datetime.now(UTC).isoformat(),
     }
     if state is None:
@@ -464,11 +474,14 @@ def resume_run_decision(
         current["approval"] = {
             **(current.get("approval") or {}),
             "status": status,
+            "dispatched": dispatched,
             "wao_officer_name": wao_officer_name,
+            "approval_token": approval_token,
             "decided_at": decision_payload["decided_at"],
         }
         if isinstance(current.get("advisory"), dict):
             current["advisory"]["status"] = status
+            current["advisory"]["dispatched"] = dispatched
         _trace(current, "human_approval", "wao_decision", decision_payload)
         current["_next_transition"] = "approved" if approved else "rejected"
         return current

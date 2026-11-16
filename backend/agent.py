@@ -9,6 +9,7 @@ from typing import Any
 
 from .db import connect
 from .foundation import get_agent_foundation
+from .policy import enforce_decision_policy
 from .state_graph import AgentState, build_graph, resume_run_decision, save_run_state
 
 
@@ -54,16 +55,30 @@ def decide(
     approved: bool,
     wao_officer_name: str,
     notes: str = "",
+    *,
+    approval_token: str | None = None,
+    channel: str = "api",
+    require_explicit_token: bool = False,
 ) -> dict[str, Any]:
-    if not wao_officer_name.strip():
-        raise ValueError("wao_officer_name is required for any decision")
+    checked = enforce_decision_policy(
+        run_id=run_id,
+        approved=approved,
+        wao_officer_name=wao_officer_name,
+        approval_token=approval_token,
+        channel=channel,
+        require_explicit_token=require_explicit_token,
+    )
+    officer = checked["officer"]
     resumed_state = resume_run_decision(
         run_id=run_id,
         approved=approved,
-        wao_officer_name=wao_officer_name.strip(),
+        wao_officer_name=officer,
         notes=notes,
+        approval_token=checked["approval_token"],
+        policy_decision=checked["policy_decision"],
     )
     status = resumed_state["status"]
+    dispatched = bool(approved)
     with connect() as db:
         db.execute(
             "UPDATE staged_advisories SET status = ? WHERE run_id = ?",
@@ -77,12 +92,29 @@ def decide(
                 "Ecovun-Audit",
                 "wao_decision",
                 "human_approval",
-                json.dumps({"officer": wao_officer_name.strip(), "notes": notes}),
-                json.dumps({"status": status}),
+                json.dumps(
+                    {
+                        "officer": officer,
+                        "notes": notes,
+                        "approval_token": checked["approval_token"],
+                        "channel": channel,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "status": status,
+                        "dispatched": dispatched,
+                        "advisory_id": checked["advisory_id"],
+                    }
+                ),
             ),
         )
     return {
         "run_id": run_id,
         "status": status,
-        "wao_officer_name": wao_officer_name.strip(),
+        "dispatched": dispatched,
+        "wao_officer_name": officer,
+        "advisory_id": checked["advisory_id"],
+        "approval_token": checked["approval_token"],
+        "policy_decision": checked["policy_decision"],
     }

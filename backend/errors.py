@@ -19,7 +19,7 @@ def sanitize_error_message(message: str) -> str:
     return cleaned
 
 
-class EcovunaError(Exception):
+class EcovunaError(ValueError):
     """Base class for application-specific domain and API errors."""
 
     def __init__(
