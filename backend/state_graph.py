@@ -292,6 +292,7 @@ def _recover_node(state: AgentState) -> AgentState:
 def _citation_self_check(state: AgentState) -> AgentState:
     from .mcp_client import BORROWED_SERVER_ID, call_borrowed_reference_server
     from .mcp_server import fetch_kalro_guidelines
+    from .research_connectors import gather_research_bundle
     from .safety import detect_signal_conflicts
 
     plan = state.get("plan", {})
@@ -328,6 +329,31 @@ def _citation_self_check(state: AgentState) -> AgentState:
         server=BORROWED_SERVER_ID,
     )
     state.setdefault("evidence", {})["borrowed_reference"] = borrowed_ref
+
+    research_bundle = gather_research_bundle(
+        run_id=state["run_id"],
+        rule_id=guideline["rule_id"],
+        bulletin_id=guideline["bulletin_id"],
+        simulate_web_failure="web_offline" in scenario or "borrowed_offline" in scenario,
+    )
+    _trace(
+        state,
+        "citation_self_check",
+        "ingest_document_source",
+        research_bundle["document_source"],
+        server="ecovuna-research-connector",
+    )
+    _trace(
+        state,
+        "citation_self_check",
+        "fetch_official_web_source",
+        research_bundle["web_source"],
+        server="ecovuna-research-connector",
+    )
+    state["evidence"]["research_sources"] = research_bundle["sources"]
+    if not research_bundle["citation_verified"]:
+        state["_next_transition"] = "missing_evidence"
+        return state
 
     pre_existing_conflicts = list(state.get("conflicts") or [])
     safety_report = detect_signal_conflicts(
