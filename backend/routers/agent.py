@@ -7,6 +7,14 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from ..agent import decide, triage
 from ..artifacts_repository import repository as artifact_repo
+from ..aws_cloud import (
+    get_aws_cloud_status,
+    get_uploaded_document,
+    list_uploaded_documents,
+    run_bedrock_agent_task,
+    sync_artifact_to_s3,
+    upload_document_to_s3,
+)
 from ..contracts import (
     AgentFoundationResponse,
     AgentRunResponse,
@@ -373,3 +381,92 @@ def execute_open_weights_task(payload: dict[str, object]) -> dict[str, object]:
 def execute_reproducible_demo() -> dict[str, object]:
     """Run the reproducible end-to-end agent demonstration covering success, recovery, and safe failure (#19)."""
     return run_reproducible_demo()
+
+
+@router.get("/api/aws/status")
+def aws_status() -> dict[str, object]:
+    """Return AWS Bedrock model and S3 agronomy document vault status."""
+    return get_aws_cloud_status()
+
+
+@router.post("/api/agent/bedrock-task")
+def execute_bedrock_task(payload: dict[str, object]) -> dict[str, object]:
+    """Run a grounded Ecovuna extension task using AWS Bedrock (Amazon Nova / Llama 3) with deterministic fallback."""
+    ward = str(payload.get("ward") or "Homa Bay Central").strip()
+    prompt = str(
+        payload.get("prompt")
+        or "Assess soil moisture and stage a grounded maize advisory if safe."
+    ).strip()
+    model_id = (
+        str(payload["model_id"])
+        if payload.get("model_id") is not None
+        else None
+    )
+    force_fallback = bool(payload.get("force_fallback", False))
+    simulated = (
+        dict(payload["simulated_bedrock_response"])  # type: ignore[arg-type]
+        if isinstance(payload.get("simulated_bedrock_response"), dict)
+        else None
+    )
+    return run_bedrock_agent_task(
+        ward=ward,
+        prompt=prompt,
+        model_id=model_id,
+        simulated_bedrock_response=simulated,
+        force_fallback=force_fallback,
+    )
+
+
+@router.get("/api/documents")
+def get_documents(ward: str | None = None) -> dict[str, object]:
+    """List agronomy bulletins and field documents uploaded to the AWS S3 vault."""
+    return {
+        "documents": list_uploaded_documents(ward=ward),
+    }
+
+
+@router.get("/api/documents/{document_id}")
+def get_single_document(document_id: str) -> dict[str, object]:
+    """Fetch metadata and grounded excerpt for a specific S3-backed document."""
+    return get_uploaded_document(document_id)
+
+
+@router.post("/api/documents/upload")
+def upload_document(payload: dict[str, object]) -> dict[str, object]:
+    """Upload a bulletin, soil report, or agronomy guide to AWS S3 and index it for grounded agent citations."""
+    title = str(payload.get("title") or "").strip()
+    content = str(payload.get("content") or "").strip()
+    if not title or not content:
+        raise InvalidRequestError(
+            "Both 'title' and 'content' are required to upload a document.",
+            error_code="INVALID_DOCUMENT_PAYLOAD",
+        )
+    ward = str(payload.get("ward") or "Homa Bay Central").strip()
+    publisher = str(
+        payload.get("publisher") or "KALRO / County Extension Directorate"
+    ).strip()
+    filename = str(payload.get("filename") or "agronomy_bulletin.md").strip()
+    uploaded_by = str(
+        payload.get("uploaded_by") or "Godfrey Ogembo — WAO-KE-043"
+    ).strip()
+    force_local = bool(payload.get("force_local", False))
+    return upload_document_to_s3(
+        title=title,
+        content=content,
+        ward=ward,
+        publisher=publisher,
+        filename=filename,
+        uploaded_by=uploaded_by,
+        force_local=force_local,
+    )
+
+
+@router.post("/api/agent/artifacts/{artifact_id}/sync-s3")
+def sync_single_artifact_to_s3(
+    artifact_id: str,
+    payload: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Sync a versioned field artifact (field_brief, sms, ussd, visit_list) to AWS S3."""
+    art = artifact_repo.get_artifact(artifact_id)
+    force_local = bool((payload or {}).get("force_local", False))
+    return sync_artifact_to_s3(art, force_local=force_local)

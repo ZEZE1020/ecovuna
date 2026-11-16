@@ -79,7 +79,15 @@ jobs:
             --memory 512Mi \
             --min-instances 0 \
             --max-instances 2 \
-            --set-env-vars "FRONTEND_ORIGIN=https://${DOMAIN},LLM_PROVIDER=deterministic_offline,STORAGE_BACKEND=firestore,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},RELEASE_VERSION=${RELEASE_TAG}"
+            --set-env-vars "FRONTEND_ORIGIN=https://${DOMAIN},LLM_PROVIDER=${LLM_PROVIDER:-deterministic_offline},AWS_REGION=${AWS_REGION:-us-east-1},BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID:-amazon.nova-lite-v1:0},AWS_S3_BUCKET=${AWS_S3_BUCKET:-hackathon-848074620906-team-47},STORAGE_BACKEND=firestore,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},RELEASE_VERSION=${RELEASE_TAG}"
+        env:
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          BEDROCK_MODEL_ID: ${{ vars.BEDROCK_MODEL_ID }}
+          AWS_S3_BUCKET: ${{ vars.AWS_S3_BUCKET }}
+          echo_placeholder: "true"
+      - name: Resolve API URL
+        run: |
           echo "API_URL=$(gcloud run services describe "$API_SERVICE" \
             --region "$REGION" --project "$PROJECT_ID" \
             --format='value(status.url)')" >> "$GITHUB_ENV"

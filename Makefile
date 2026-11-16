@@ -1,7 +1,7 @@
 .SHELLFLAGS := -eu -o pipefail -c
 SHELL := /bin/bash
 
-.PHONY: setup ingest dev telemetry-up telemetry-down test model-task demo clean
+.PHONY: setup ingest dev telemetry-up telemetry-down test model-task bedrock-task demo release clean
 
 UV ?= uv
 VENV ?= .venv
@@ -66,6 +66,17 @@ model-task: setup
 
 demo: setup
 	$(VENV_PYTHON) -m backend.demo
+
+bedrock-task: setup
+	$(VENV_PYTHON) -c "import json; from backend.aws_cloud import run_bedrock_agent_task; r = run_bedrock_agent_task(); print(json.dumps({'run_id': r['run_id'], 'status': r['status'], 'bedrock_execution': r['bedrock_execution']}, indent=2))"
+
+release:
+	@test -n "$(VERSION)" || { echo "Usage: make release VERSION=v0.3.0"; exit 1; }
+	$(RUFF) check backend
+	$(PYTEST) backend/tests
+	git tag -a "$(VERSION)" -m "Ecovuna release $(VERSION)"
+	git push origin main
+	git push origin "$(VERSION)"
 
 clean:
 	rm -rf $(VENV)

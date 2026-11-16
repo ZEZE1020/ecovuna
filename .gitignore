@@ -11,6 +11,7 @@ out/
 data/*.db
 data/*.sqlite
 data/*.json
+data/s3_vault/
 .pytest_cache/
 .ruff_cache/
 .context/

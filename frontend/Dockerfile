@@ -5,7 +5,7 @@ ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 ARG NEXT_PUBLIC_RELEASE_VERSION=local
 ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 ENV NEXT_PUBLIC_RELEASE_VERSION=${NEXT_PUBLIC_RELEASE_VERSION}
-COPY package.json tsconfig.json next.config.mjs next-env.d.ts ./
+COPY package.json tsconfig.json next.config.mjs next-env.d.ts postcss.config.mjs tailwind.config.ts ./
 COPY pnpm-lock.yaml ./
 COPY src src
 RUN pnpm install --frozen-lockfile && pnpm build

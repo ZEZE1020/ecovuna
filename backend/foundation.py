@@ -22,7 +22,11 @@ class AgentFoundation:
 
 def get_agent_foundation() -> AgentFoundation:
     provider = os.getenv("LLM_PROVIDER", "deterministic_offline").strip().lower()
-    if provider == "ollama":
+    if provider in {"aws", "bedrock", "aws_bedrock"}:
+        provider = "aws_bedrock"
+        model = os.getenv("BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
+        mode = "aws_bedrock_model"
+    elif provider == "ollama":
         model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
         mode = "local_model"
     elif provider in {"gemini", "google_genai"}:

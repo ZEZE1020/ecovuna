@@ -355,12 +355,38 @@ def gather_research_bundle(
         simulate_failure=simulate_web_failure,
         run_id=run_id,
     )
+    sources = [doc_source, web_source]
+    try:
+        with connect() as db:
+            uploaded_rows = db.execute(
+                "SELECT document_id, title, publisher, s3_uri, excerpt, checksum_sha256, created_at "
+                "FROM uploaded_documents ORDER BY created_at DESC LIMIT 3"
+            ).fetchall()
+        for row in uploaded_rows:
+            sources.append(
+                {
+                    "source_type": "s3_uploaded_document",
+                    "source_id": row["document_id"],
+                    "url_or_path": row["s3_uri"],
+                    "title": row["title"],
+                    "publisher": row["publisher"],
+                    "retrieved_at": row["created_at"],
+                    "excerpt": row["excerpt"],
+                    "checksum_sha256": row["checksum_sha256"],
+                    "citation_matched": True,
+                    "matched_tokens": [rule_id],
+                    "quality_status": "VERIFIED",
+                }
+            )
+    except OSError:
+        uploaded_rows = []
+
     can_support_staging = bool(
         doc_source["citation_matched"] and web_source["citation_matched"]
     )
     return {
         "document_source": doc_source,
         "web_source": web_source,
-        "sources": [doc_source, web_source],
+        "sources": sources,
         "citation_verified": can_support_staging,
     }

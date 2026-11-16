@@ -77,6 +77,7 @@ type Advisory = {
   per_farmer_kes: number;
   citations: { sensor_ids?: string[]; plot_ids?: string[]; weather_bulletin_id?: string; kalro_rule_id?: string };
   status: string;
+  output_variants?: Array<{ language: string; channel: string; text: string; status: string }>;
 };
 type Trace = { node: string; tool: string; server: string; latency_ms: number; output: Record<string, unknown> };
 type Run = {
@@ -84,22 +85,27 @@ type Run = {
   ward: string;
   status: string;
   execution_trace: Trace[];
-  advisory: Advisory;
+  advisory: Advisory | null;
   telemetry: { readings: Array<Record<string, string | number>> };
   cost_telemetry: { duration_ms: number };
   agent_foundation?: AgentFoundation;
+  conflicts?: Array<{ code: string; summary?: string; detail?: string; recommended_verification?: string }>;
+  safety_decision?: { clarification_question?: string; recommended_verification?: string };
+  bedrock_execution?: { model_id: string; status: string; region: string };
 };
 type Audit = { id: number; timestamp: string; run_id: string; server: string; tool_name: string; action: string; input_json: string; output_json: string };
 type AgentFoundation = { project: string; provider: string; model: string; mode: string; grounded: boolean; human_approval_required: boolean };
 type EvaluationSummary = { passed: number; total: number; pass_rate: number; interpretation: { data_grounding: string; agent_usefulness: string; model_status: string } };
 type ChatMessage = { role: "user" | "agent"; text: string; run?: Run };
 type McpRegistry = { servers: Array<{ id: string; name: string; transport: string; tools: string[]; status: string }>; recent_activity: Array<{ server: string; tool_name: string; timestamp: string }> };
+type UploadedDocument = { document_id: string; title: string; publisher: string; ward: string; filename: string; s3_uri: string; storage_mode: string; excerpt: string; citation_tokens: string[]; created_at: string };
+type AwsCloudStatus = { provider: string; region: string; bedrock_model_id: string; s3_bucket: string; uploaded_documents_count: number; supported_models: string[] };
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 const RELEASE_VERSION = process.env.NEXT_PUBLIC_RELEASE_VERSION ?? "local";
 
 export default function Home() {
-  const [view, setView] = useState<"overview" | "workspace" | "operations" | "registry" | "mcp" | "audit">("overview");
+  const [view, setView] = useState<"overview" | "workspace" | "operations" | "registry" | "documents" | "mcp" | "audit">("overview");
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [advisories, setAdvisories] = useState<Advisory[]>([]);
   const [audit, setAudit] = useState<Audit[]>([]);
@@ -110,7 +116,10 @@ export default function Home() {
   const [foundation, setFoundation] = useState<AgentFoundation | null>(null);
   const [evaluation, setEvaluation] = useState<EvaluationSummary | null>(null);
   const [mcpRegistry, setMcpRegistry] = useState<McpRegistry | null>(null);
+  const [documents, setDocuments] = useState<UploadedDocument[]>([]);
+  const [awsStatus, setAwsStatus] = useState<AwsCloudStatus | null>(null);
   const [run, setRun] = useState<Run | null>(null);
+  const [sessionId, setSessionId] = useState<string>("");
   const [ward, setWard] = useState("");
   const [scenario, setScenario] = useState("sudden dry spell");
   const [loading, setLoading] = useState(true);
@@ -185,12 +194,51 @@ export default function Home() {
     setRecommendations(await recommendationsResponse.json());
   }
 
-  async function openView(nextView: "overview" | "workspace" | "operations" | "registry" | "mcp" | "audit") {
+  async function loadDocuments() {
+    const [docsResp, statusResp] = await Promise.all([
+      fetch(`${API}/api/documents`),
+      fetch(`${API}/api/aws/status`),
+    ]);
+    if (docsResp.ok) {
+      const payload = await docsResp.json() as { documents: UploadedDocument[] };
+      setDocuments(payload.documents);
+    }
+    if (statusResp.ok) {
+      setAwsStatus(await statusResp.json() as AwsCloudStatus);
+    }
+  }
+
+  async function openView(nextView: "overview" | "workspace" | "operations" | "registry" | "documents" | "mcp" | "audit") {
     setView(nextView);
     setError("");
     if (nextView === "audit") loadAudit().catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Unable to load the audit trail."));
     if (nextView === "operations") loadOperations().catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Unable to load extension operations."));
+    if (nextView === "documents") loadDocuments().catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Unable to load AWS S3 document vault."));
     if (nextView === "mcp") fetch(`${API}/api/mcp/registry`).then((response) => response.json() as Promise<McpRegistry>).then(setMcpRegistry).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Unable to load MCP registry."));
+  }
+
+  async function startBedrockRun(requestedScenario = scenario) {
+    if (!ward) return;
+    setRunning(true);
+    setError("");
+    try {
+      const response = await fetch(`${API}/api/agent/bedrock-task`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ward,
+          prompt: `Analyze ${requestedScenario} in ${ward} using AWS Bedrock and stage a grounded advisory if safe.`,
+        }),
+      });
+      if (!response.ok) throw new Error((await response.json()).detail ?? "AWS Bedrock agent run failed.");
+      setRun(await response.json());
+      await loadData();
+      setView("workspace");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "AWS Bedrock agent run failed.");
+    } finally {
+      setRunning(false);
+    }
   }
 
   async function startRun(requestedScenario = scenario) {
@@ -236,12 +284,14 @@ export default function Home() {
     try {
       const response = await fetch(`${API}/api/agent/chat`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, ward }),
+        body: JSON.stringify({ message, ward, session_id: sessionId || undefined }),
       });
       if (!response.ok) throw new Error((await response.json()).detail ?? "The agent could not answer.");
-      const payload = await response.json() as { message: string; run: Run };
+      const payload = await response.json() as { session_id?: string; message: string; run: Run };
+      if (payload.session_id) setSessionId(payload.session_id);
       setRun(payload.run);
-      setChatMessages((items) => [...items, { role: "agent", text: `${payload.message} The run is paused at the named WAO approval gate.`, run: payload.run }]);
+      const gateStatusNote = payload.run.advisory ? "The run is paused at the named WAO approval gate." : "Staging was halted safely for field verification.";
+      setChatMessages((items) => [...items, { role: "agent", text: `${payload.message} ${gateStatusNote}`, run: payload.run }]);
       await loadData();
     } catch (reason) {
       setChatMessages((items) => [...items, { role: "agent", text: reason instanceof Error ? reason.message : "The agent could not answer." }]);
@@ -251,7 +301,7 @@ export default function Home() {
   }
 
   async function decide(approved: boolean) {
-    if (!run) return;
+    if (!run || !run.advisory) return;
     setError("");
     try {
       const response = await fetch(`${API}/api/agent/decide`, {
@@ -272,8 +322,8 @@ export default function Home() {
     <a className="skip-link" href="#primary-panel">Skip to main operations panel</a>
     <header className="agent-header" role="banner"><div className="agent-brand"><span className="brand-mark" aria-hidden="true"><Leaf size={17} /><abbr title="Ecovuna Extension">EV</abbr></span><div><strong>ECOVUNA DESK</strong><span>Grounded field intelligence · Homa Bay County</span></div></div><div className="header-meta"><span className="badge badge-success badge-outline gap-1" role="status"><i aria-hidden="true" /> STATUS: {offlineMode ? "OFFLINE CACHE" : "API CONNECTED"}</span>{foundation && <span className="badge badge-primary badge-outline" title={`${foundation.project} · ${foundation.model}`}>FOUNDATION · {foundation.mode.replace("_", " ")}</span>}<span className="badge badge-ghost" title="Deployed release">{RELEASE_VERSION}</span>{apiTelemetry && <span className={`otel-status ${apiTelemetry.enabled ? "enabled" : "disabled"}`} title={`OpenTelemetry exporter: ${apiTelemetry.exporter}`}>OTEL: {apiTelemetry.enabled ? "ACTIVE" : "STANDBY"}</span>}<span className="user-badge" aria-hidden="true"><UserRound size={15} /></span><span>Godfrey Ogembo<br /><small>WAO-KE-043</small></span></div></header>
     <div className="agent-layout">
-      <aside className="agent-nav" aria-label="Primary extension navigation"><div className="office-card"><span>ACTIVE OFFICE</span><strong>Extension network</strong><small>County operations workspace</small></div><span className="nav-heading">OPERATIONS</span><NavButton active={view === "overview"} label="Situation overview" icon={<Radar size={16} />} onClick={() => openView("overview")} /><NavButton active={view === "workspace"} label="Agent workspace" icon={<Workflow size={16} />} onClick={() => openView("workspace")} count={dashboard?.counts.pending_advisories} /><NavButton active={view === "registry"} label="Farm registry" icon={<UserPlus size={16} />} onClick={() => openView("registry")} count={dashboard?.counts.households} /><NavButton active={view === "operations"} label="Partner matching" icon={<Database size={16} />} onClick={() => openView("operations")} count={operationsSummary?.recommended_assignments} /><NavButton active={view === "mcp"} label="MCP registry" icon={<Terminal size={16} />} onClick={() => openView("mcp")} /><NavButton active={view === "audit"} label="Audit trail" icon={<ClipboardCheck size={16} />} onClick={() => openView("audit")} /><div className="nav-note" role="note"><LockKeyhole size={15} aria-hidden="true" /><strong>APPROVAL POLICY: Human sign-off required</strong><span>Every outbound action pauses for named officer sign-off.</span></div></aside>
-      <section className="agent-content" id="primary-panel" aria-live="polite"><nav className="mobile-view-switcher" aria-label="Mobile view switcher"><button type="button" className={view === "overview" ? "active" : ""} onClick={() => openView("overview")}>Overview</button><button type="button" className={view === "workspace" ? "active" : ""} onClick={() => openView("workspace")}>Workspace</button><button type="button" className={view === "registry" ? "active" : ""} onClick={() => openView("registry")}>Registry</button><button type="button" className={view === "operations" ? "active" : ""} onClick={() => openView("operations")}>Partners</button><button type="button" className={view === "mcp" ? "active" : ""} onClick={() => openView("mcp")}>MCP</button><button type="button" className={view === "audit" ? "active" : ""} onClick={() => openView("audit")}>Audit</button></nav><div className="content-title"><div><span className="kicker">EXTENSION OPERATIONS CONSOLE</span><h1>{view === "overview" ? "Today’s priorities" : view === "workspace" ? "Agent workspace" : view === "operations" ? "Partner matching" : view === "registry" ? "Farm registry" : view === "mcp" ? "MCP registry" : "Audit trail"}</h1><p>{view === "overview" ? "A simple starting point for field decisions, farmer follow-up, and trusted advice." : view === "workspace" ? "Inspect the agent's evidence, then make the accountable human decision." : view === "operations" ? "Match farms with verified agrovets, seed hubs, and fertiliser partners using field conditions." : view === "registry" ? "Register farmers and map their farms with an auditable officer workflow." : view === "mcp" ? "Inspect the servers and tools that make every agent run explainable." : "Append-only record of agent tool calls and officer decisions."}</p></div>{view !== "audit" && view !== "operations" && view !== "registry" && view !== "mcp" && <button className="run-button btn btn-primary" onClick={() => startRun()} disabled={running || !ward}>✦ {running ? "Agent is working…" : "Run agent analysis"}</button>}</div>{offlineMode && <div className="offline-banner" role="status"><strong>OFFLINE / CACHED MODE:</strong> Live network connection is unavailable; displaying verified local cache. <button type="button" className="retry-action" onClick={() => void loadData()}>Retry connection</button></div>}{error && <div className="error-message alert alert-error" role="alert"><strong>ERROR:</strong> {error} <button type="button" className="retry-action" onClick={() => void loadData()}>Retry now</button></div>}{loading ? <div className="loading-state" role="status">Loading county workspace…</div> : view === "overview" ?       <Overview dashboard={dashboard} advisories={advisories} telemetry={telemetry} evaluation={evaluation} ward={ward} setWard={setWard} scenario={scenario} setScenario={setScenario} onStart={startRun} onAsk={askEcovuna} askQuestion={askQuestion} setAskQuestion={setAskQuestion} running={running} onOpenWorkspace={() => openView("workspace")} /> : view === "workspace" ? <Workspace run={run} advisories={advisories} onStart={startRun} onDecision={decide} running={running} /> : view === "operations" ? <Operations summary={operationsSummary} recommendations={recommendations} ward={ward} onRefresh={loadOperations} /> : view === "registry" ? <Registry wards={dashboard?.wards.map((item) => item.ward) ?? []} /> : view === "mcp" ? <McpRegistryPanel registry={mcpRegistry} onRetry={() => openView("mcp")} /> : <AuditTable entries={audit} onRetry={loadAudit} />}</section>
+      <aside className="agent-nav" aria-label="Primary extension navigation"><div className="office-card"><span>ACTIVE OFFICE</span><strong>Extension network</strong><small>County operations workspace</small></div><span className="nav-heading">OPERATIONS</span><NavButton active={view === "overview"} label="Situation overview" icon={<Radar size={16} />} onClick={() => openView("overview")} /><NavButton active={view === "workspace"} label="Agent workspace" icon={<Workflow size={16} />} onClick={() => openView("workspace")} count={dashboard?.counts.pending_advisories} /><NavButton active={view === "registry"} label="Farm registry" icon={<UserPlus size={16} />} onClick={() => openView("registry")} count={dashboard?.counts.households} /><NavButton active={view === "documents"} label="S3 Document Vault" icon={<FileSearch size={16} />} onClick={() => openView("documents")} count={documents.length || awsStatus?.uploaded_documents_count} /><NavButton active={view === "operations"} label="Partner matching" icon={<Database size={16} />} onClick={() => openView("operations")} count={operationsSummary?.recommended_assignments} /><NavButton active={view === "mcp"} label="MCP registry" icon={<Terminal size={16} />} onClick={() => openView("mcp")} /><NavButton active={view === "audit"} label="Audit trail" icon={<ClipboardCheck size={16} />} onClick={() => openView("audit")} /><div className="nav-note" role="note"><LockKeyhole size={15} aria-hidden="true" /><strong>APPROVAL POLICY: Human sign-off required</strong><span>Every outbound action pauses for named officer sign-off.</span></div></aside>
+      <section className="agent-content" id="primary-panel" aria-live="polite"><nav className="mobile-view-switcher" aria-label="Mobile view switcher"><button type="button" className={view === "overview" ? "active" : ""} onClick={() => openView("overview")}>Overview</button><button type="button" className={view === "workspace" ? "active" : ""} onClick={() => openView("workspace")}>Workspace</button><button type="button" className={view === "registry" ? "active" : ""} onClick={() => openView("registry")}>Registry</button><button type="button" className={view === "documents" ? "active" : ""} onClick={() => openView("documents")}>S3 Docs</button><button type="button" className={view === "operations" ? "active" : ""} onClick={() => openView("operations")}>Partners</button><button type="button" className={view === "mcp" ? "active" : ""} onClick={() => openView("mcp")}>MCP</button><button type="button" className={view === "audit" ? "active" : ""} onClick={() => openView("audit")}>Audit</button></nav><div className="content-title"><div><span className="kicker">EXTENSION OPERATIONS CONSOLE</span><h1>{view === "overview" ? "Today’s priorities" : view === "workspace" ? "Agent workspace" : view === "operations" ? "Partner matching" : view === "registry" ? "Farm registry" : view === "documents" ? "AWS S3 Agronomy Document Vault" : view === "mcp" ? "MCP registry" : "Audit trail"}</h1><p>{view === "overview" ? "A simple starting point for field decisions, farmer follow-up, and trusted advice." : view === "workspace" ? "Inspect the agent's evidence, then make the accountable human decision." : view === "operations" ? "Match farms with verified agrovets, seed hubs, and fertiliser partners using field conditions." : view === "registry" ? "Register farmers and map their farms with an auditable officer workflow." : view === "documents" ? "Upload KALRO bulletins, soil reports, and county agronomy guides to AWS S3 for grounded AI citations." : view === "mcp" ? "Inspect the servers and tools that make every agent run explainable." : "Append-only record of agent tool calls and officer decisions."}</p></div>{view !== "audit" && view !== "operations" && view !== "registry" && view !== "documents" && view !== "mcp" && <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}><button className="run-button btn btn-primary" onClick={() => void startBedrockRun()} disabled={running || !ward}>✦ {running ? "Running AWS Bedrock…" : "Run with AWS Bedrock AI"}</button><button className="quiet-button" onClick={() => void startRun()} disabled={running || !ward}>Deterministic run</button></div>}</div>{offlineMode && <div className="offline-banner" role="status"><strong>OFFLINE / CACHED MODE:</strong> Live network connection is unavailable; displaying verified local cache. <button type="button" className="retry-action" onClick={() => void loadData()}>Retry connection</button></div>}{error && <div className="error-message alert alert-error" role="alert"><strong>ERROR:</strong> {error} <button type="button" className="retry-action" onClick={() => void loadData()}>Retry now</button></div>}{loading ? <div className="loading-state" role="status">Loading county workspace…</div> : view === "overview" ?       <Overview dashboard={dashboard} advisories={advisories} telemetry={telemetry} evaluation={evaluation} ward={ward} setWard={setWard} scenario={scenario} setScenario={setScenario} onStart={startRun} onAsk={askEcovuna} askQuestion={askQuestion} setAskQuestion={setAskQuestion} running={running} onOpenWorkspace={() => openView("workspace")} /> : view === "workspace" ? <Workspace run={run} advisories={advisories} onStart={startRun} onDecision={decide} running={running} /> : view === "operations" ? <Operations summary={operationsSummary} recommendations={recommendations} ward={ward} onRefresh={loadOperations} /> : view === "registry" ? <Registry wards={dashboard?.wards.map((item) => item.ward) ?? []} /> : view === "documents" ? <DocumentsVault documents={documents} awsStatus={awsStatus} wards={dashboard?.wards.map((item) => item.ward) ?? []} onRefresh={loadDocuments} /> : view === "mcp" ? <McpRegistryPanel registry={mcpRegistry} onRetry={() => openView("mcp")} /> : <AuditTable entries={audit} onRetry={loadAudit} />}</section>
     </div>
     <button className="chat-launcher" onClick={() => setChatOpen((open) => !open)} aria-label="Open Ecovuna agent chat"><MessageCircle size={22} /><span>Ask Ecovuna</span></button>
     {chatOpen && <section className="agent-chat" aria-label="Ecovuna agent chat"><header><div><strong>Ecovuna agent</strong><small>Grounded · inspectable · approval-aware</small></div><button onClick={() => setChatOpen(false)} aria-label="Close chat"><X size={17} /></button></header><div className="chat-messages">{chatMessages.map((message, index) => <div className={`chat-message ${message.role}`} key={`${message.role}-${index}`}><span>{message.text}</span>{message.run && <button className="chat-run-link" onClick={() => openView("workspace")}>Inspect run →</button>}</div>)}{chatLoading && <div className="chat-message agent"><span className="typing">Agent is checking telemetry and guidance…</span></div>}</div><form className="chat-composer" onSubmit={sendChat}><input value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="Ask about this ward…" aria-label="Message Ecovuna" disabled={chatLoading} /><button type="submit" disabled={chatLoading || !chatInput.trim()} aria-label="Send message"><Send size={17} /></button></form></section>}
@@ -368,7 +418,51 @@ function Workspace({ run, advisories, onStart, onDecision, running }: { run: Run
   return <div className="workspace-view"><div className="run-context"><div><span className="kicker">ACTIVE RUN · {run.run_id}</span><h2>{run.ward} investigation</h2><p>Completed in {Math.round(run.cost_telemetry.duration_ms)} ms · {run.telemetry.readings.length} telemetry reading(s)</p></div><span className={`run-status ${pending ? "paused" : "complete"}`}>{pending ? "Paused at approval gate" : run.status.replaceAll("_", " ")}</span></div><section className="agent-contract panel-white"><div><span className="kicker">AGENT OPERATING CONTRACT</span><h3>{run.agent_foundation?.project ?? "Ecovuna Agentic Extension Foundation"}</h3><p>This run is grounded in registered tools and cannot send an outbound action without your decision.</p></div><div className="contract-badges"><span className="badge badge-success badge-outline">Evidence linked</span><span className="badge badge-info badge-outline">Tool calls visible</span><span className="badge badge-warning badge-outline">Human control required</span></div></section><div className="agent-flow"><FlowStep number="1" label="Plan & fetch" done /><FlowStep number="2" label="Check evidence" done /><FlowStep number="3" label="Prepare action" done /><FlowStep number="4" label="Your decision" active={pending} /></div><section className="agent-plan panel-white"><div className="plan-icon"><Sparkles size={18} /></div><div><span className="kicker">AGENT PLAN</span><h3>Investigate {run.ward}, validate the signal, then prepare a reversible advisory</h3><p>The agent used {run.execution_trace.length} tool steps. Review each step below before deciding whether the recommendation is safe to send.</p></div></section><div className="trace-stack">{run.execution_trace.map((trace, index) => <TraceCard key={`${trace.tool}-${index}`} trace={trace} index={index} />)}</div><ApprovalCard run={run} pending={pending} onDecision={onDecision} /></div>;
 }
 
-function ApprovalCard({ run, pending, onDecision }: { run: Run; pending: boolean; onDecision: (approved: boolean) => void }) { const advisory = run.advisory; return <section className="approval-card"><div className="approval-header"><div><span className="kicker"><LockKeyhole size={12} /> HUMAN-IN-THE-LOOP GATE</span><h2>{pending ? "Review before dispatch" : "Decision recorded"}</h2><p>{pending ? "The agent has staged this advisory but cannot dispatch until you approve or flag it." : `This advisory is ${run.status.replaceAll("_", " ").toLowerCase()}.`}</p></div><span className="gate-lock"><Clock3 size={13} /> {pending ? "PAUSED" : "CLOSED"}</span></div><div className="approval-body"><div className="advisory-evidence"><h3>Recommended action</h3><p>Target <strong>{advisory.target_growth_stage.replaceAll("_", " ")}</strong> plots in <strong>{advisory.ward}</strong>. Package <strong>{advisory.evoucher_package_code}</strong> at KES {advisory.per_farmer_kes.toLocaleString()} per affected plot.</p><div className="source-chips">{advisory.citations.sensor_ids?.map((sensor) => <span key={sensor}><Activity size={11} /> Sensor: {sensor}</span>)}{advisory.citations.kalro_rule_id && <span><FileSearch size={11} /> Rule: {advisory.citations.kalro_rule_id}</span>}{advisory.citations.weather_bulletin_id && <span><Database size={11} /> Bulletin: {advisory.citations.weather_bulletin_id}</span>}</div><div className="message-preview"><span className="kicker">DRAFT ENGLISH MESSAGE</span><p>{advisory.draft_sms_english}</p><small>USSD {advisory.ussd_menu_payload} · {advisory.affected_household_count} affected household(s)</small></div></div><div className="decision-form"><label>Officer of record<input value="Godfrey Ogembo — WAO-KE-043" readOnly /></label><label>Review note<textarea defaultValue="Reviewed against the agent evidence." readOnly={!pending} /></label>{pending ? <><button className="approve-action" onClick={() => onDecision(true)}><Check size={14} /> Approve and resume dispatch</button><button className="reject-action" onClick={() => onDecision(false)}><Flag size={14} /> Flag for field visit</button></> : <div className="recorded-action"><ShieldCheck size={14} /> Recorded in audit trail</div>}</div></div></section>; }
+function ApprovalCard({ run, pending, onDecision }: { run: Run; pending: boolean; onDecision: (approved: boolean) => void }) {
+  const advisory = run.advisory;
+  if (!advisory) {
+    const conflicts = run.conflicts ?? [];
+    const question = run.safety_decision?.clarification_question ?? "Conflicting or missing field signals prevented safe advisory staging.";
+    const verification = run.safety_decision?.recommended_verification ?? "Conduct a WAO field verification visit before staging outbound advice.";
+    return <section className="approval-card"><div className="approval-header"><div><span className="kicker"><CircleAlert size={12} /> SAFETY HALT · FIELD VERIFICATION REQUIRED</span><h2>Staging halted for safety verification</h2><p>{question}</p></div><span className="gate-lock">HALTED SAFELY</span></div><div className="approval-body"><div className="advisory-evidence"><h3>Detected signal conflicts</h3><p><strong>Recommended verification:</strong> {verification}</p><div className="source-chips">{conflicts.map((c, idx) => <span key={`${c.code}-${idx}`}><CircleAlert size={11} /> {c.code}: {c.summary ?? c.detail ?? c.recommended_verification}</span>)}</div></div><div className="decision-form"><div className="recorded-action"><ShieldCheck size={14} /> No ungrounded SMS or voucher was staged.</div></div></div></section>;
+  }
+  return <section className="approval-card"><div className="approval-header"><div><span className="kicker"><LockKeyhole size={12} /> HUMAN-IN-THE-LOOP GATE</span><h2>{pending ? "Review before dispatch" : "Decision recorded"}</h2><p>{pending ? "The agent has staged this advisory but cannot dispatch until you approve or flag it." : `This advisory is ${run.status.replaceAll("_", " ").toLowerCase()}.`}</p></div><span className="gate-lock"><Clock3 size={13} /> {pending ? "PAUSED" : "CLOSED"}</span></div><div className="approval-body"><div className="advisory-evidence"><h3>Recommended action</h3><p>Target <strong>{advisory.target_growth_stage.replaceAll("_", " ")}</strong> plots in <strong>{advisory.ward}</strong>. Package <strong>{advisory.evoucher_package_code}</strong> at KES {advisory.per_farmer_kes.toLocaleString()} per affected plot.</p><div className="source-chips">{advisory.citations.sensor_ids?.map((sensor) => <span key={sensor}><Activity size={11} /> Sensor: {sensor}</span>)}{advisory.citations.kalro_rule_id && <span><FileSearch size={11} /> Rule: {advisory.citations.kalro_rule_id}</span>}{advisory.citations.weather_bulletin_id && <span><Database size={11} /> Bulletin: {advisory.citations.weather_bulletin_id}</span>}</div><div className="message-preview"><span className="kicker">DRAFT ENGLISH MESSAGE</span><p>{advisory.draft_sms_english}</p><small>USSD {advisory.ussd_menu_payload} · {advisory.affected_household_count} affected household(s)</small></div></div><div className="decision-form"><label>Officer of record<input value="Godfrey Ogembo — WAO-KE-043" readOnly /></label><label>Review note<textarea defaultValue="Reviewed against the agent evidence." readOnly={!pending} /></label>{pending ? <><button className="approve-action" onClick={() => onDecision(true)}><Check size={14} /> Approve and resume dispatch</button><button className="reject-action" onClick={() => onDecision(false)}><Flag size={14} /> Flag for field visit</button></> : <div className="recorded-action"><ShieldCheck size={14} /> Recorded in audit trail</div>}</div></div></section>;
+}
+
+function DocumentsVault({ documents, awsStatus, wards, onRefresh }: { documents: UploadedDocument[]; awsStatus: AwsCloudStatus | null; wards: string[]; onRefresh: () => Promise<void> }) {
+  const [title, setTitle] = useState("");
+  const [publisher, setPublisher] = useState("KALRO Homa Bay Research Centre");
+  const [ward, setWard] = useState(wards[0] ?? "Homa Bay Central");
+  const [filename, setFilename] = useState("kalro_field_bulletin_2026.md");
+  const [content, setContent] = useState("Official KALRO-HB-2026-01 & KMD-2026-10-14 field bulletin: Hold nitrogen top-dressing during dry spells and apply root-zone hydrogel at 5 kg/acre.");
+  const [uploading, setUploading] = useState(false);
+  const [statusMsg, setStatusMsg] = useState("");
+
+  async function handleUpload(event: FormEvent) {
+    event.preventDefault();
+    if (!title.trim() || !content.trim()) return;
+    setUploading(true);
+    setStatusMsg("");
+    try {
+      const resp = await fetch(`${API}/api/documents/upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, publisher, ward, filename, content }),
+      });
+      if (!resp.ok) throw new Error((await resp.json()).detail ?? "Document upload failed.");
+      const uploaded = await resp.json() as UploadedDocument;
+      setStatusMsg(`Uploaded ${uploaded.document_id} to ${uploaded.s3_uri} (${uploaded.storage_mode}).`);
+      setTitle("");
+      await onRefresh();
+    } catch (reason) {
+      setStatusMsg(reason instanceof Error ? reason.message : "Document upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return <div className="registry-view"><div className="evaluation-strip panel-white"><div><span className="kicker">AWS CLOUD AI + S3 VAULT</span><h3>Amazon Bedrock ({awsStatus?.bedrock_model_id ?? "amazon.nova-lite-v1:0"}) · S3 Bucket ({awsStatus?.s3_bucket ?? "hackathon-848074620906-team-47"})</h3><p>Uploaded agronomy bulletins and field reports are stored in AWS S3 with SHA-256 checksums and automatically indexed for grounded agent citations.</p></div><div className="evaluation-score"><strong>{documents.length}</strong><span>S3 documents indexed</span></div></div><div className="registry-grid"><form className="panel-white onboarding-form" onSubmit={handleUpload}><span className="kicker">UPLOAD TO AWS S3</span><h2>Add agronomy bulletin or field report</h2><p>Documents uploaded here are synced to S3 and cited during agent triage and chat runs.</p><label>Document title<input required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Homa Bay Short Rains Agronomy Advisory" /></label><label>Publisher / Authority<input required value={publisher} onChange={(e) => setPublisher(e.target.value)} /></label><label>Target ward<select value={ward} onChange={(e) => setWard(e.target.value)}>{(wards.length ? wards : ["Homa Bay Central", "Ndhiwa", "Suba South"]).map((w) => <option key={w}>{w}</option>)}</select></label><label>Filename<input required value={filename} onChange={(e) => setFilename(e.target.value)} /></label><label>Bulletin text & citation IDs (e.g. KALRO-HB-2026-01)<textarea required rows={4} style={{ width: "100%", marginTop: "5px", padding: "9px", border: "1px solid #cbd7de", borderRadius: "4px" }} value={content} onChange={(e) => setContent(e.target.value)} /></label><button className="command-run" type="submit" disabled={uploading}>{uploading ? "Uploading to S3…" : "Upload to AWS S3 & index"}</button>{statusMsg && <div className="operation-message">{statusMsg}</div>}</form><div className="panel-white registry-list"><div className="live-heading"><h2>Indexed S3 agronomy documents</h2><span>{documents.length} in vault</span></div>{documents.length === 0 ? <p className="empty-copy">No custom documents uploaded yet. Upload a KALRO or county bulletin on the left to sync with AWS S3.</p> : documents.map((doc) => <div className="registry-row" key={doc.document_id}><div><strong>{doc.title}</strong><span>{doc.document_id} · {doc.publisher} · <code>{doc.s3_uri}</code></span><small style={{ display: "block", marginTop: "4px", color: "#1f3040" }}>“{doc.excerpt}”</small></div><b>{doc.ward}<small>STATUS: {doc.storage_mode.toUpperCase()}</small></b></div>)}</div></div></div>;
+}
 
 function TraceCard({ trace, index }: { trace: Trace; index: number }) { const outputKeys = Object.keys(trace.output); return <details className="trace-card" open><summary><span className="trace-check"><Check size={12} /></span><span><strong>{index + 1}. {trace.node.replaceAll("_", " ")}</strong><small><Terminal size={11} /> {trace.server} · {trace.tool}</small></span><time>{trace.latency_ms} ms</time></summary><div className="trace-evidence"><div><span>Agent step</span><strong>{trace.tool.replaceAll("_", " ")}</strong></div><div><span>Evidence returned</span><strong>{outputKeys.length} fields</strong></div><div><span>Operator action</span><strong>Inspect or continue</strong></div></div><pre>{JSON.stringify(trace.output, null, 2)}</pre></details>; }
 function FlowStep({ number, label, done, active }: { number: string; label: string; done?: boolean; active?: boolean }) { return <div className={`flow-step ${done ? "done" : ""} ${active ? "active" : ""}`}><b>{done ? <Check size={12} /> : number}</b><span>{label}</span></div>; }

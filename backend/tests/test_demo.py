@@ -16,7 +16,7 @@ def test_reproducible_demo_covers_success_path_recovery_and_safe_failure() -> No
     sp = report["success_path"]
     assert sp["plan"]["steps"]
     assert len(sp["mcp_calls"]) >= 5
-    assert len(sp["source_excerpts"]) == 2
+    assert len(sp["source_excerpts"]) >= 2
     assert sp["citations"]["kalro_rule_id"] == "KALRO-HB-2026-01"
     assert sp["multilingual_variants_count"] == 12
     assert len(sp["generated_artifacts"]) == 4
