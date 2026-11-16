@@ -17,6 +17,7 @@ from ..contracts import (
     EvaluationSummaryResponse,
     TriageRequest,
 )
+from ..conversations import get_conversation_session, run_conversation_turn
 from ..errors import EcovunaError, InvalidRequestError, ProviderUnavailableError
 from ..evals.summary import summary as evaluation_summary
 from ..foundation import get_agent_foundation
@@ -63,32 +64,17 @@ def run_triage(request: TriageRequest) -> AgentRunResponse:
 
 @router.post("/api/agent/chat", response_model=ChatResponse)
 def agent_chat(request: ChatRequest) -> ChatResponse:
-    """Translate a plain-language question into a grounded, inspectable run."""
+    """Translate a plain-language question into a grounded, context-aware run."""
     if not request.message.strip():
         raise InvalidRequestError("message is required.", error_code="EMPTY_MESSAGE")
-    normalized = request.message.lower()
-    if any(
-        token in normalized
-        for token in (
-            "microclimate",
-            "divergen",
-            "lake-shore",
-            "hilltop",
-            "stale_weather",
-            "missing_ownership",
-            "contradictory",
-            "conflict",
-        )
-    ):
-        scenario = normalized
-    elif "flood" in normalized or "water" in normalized:
-        scenario = "flash flood waterlogging"
-    elif "flower" in normalized:
-        scenario = "flowering maize dry spell"
-    else:
-        scenario = "sudden dry spell"
     try:
-        result = triage(request.ward.strip(), scenario)
+        turn = run_conversation_turn(
+            message=request.message.strip(),
+            ward=request.ward,
+            session_id=request.session_id,
+            crop=request.crop,
+            season=request.season,
+        )
     except EcovunaError:
         raise
     except KijaniSpaceError as exc:
@@ -98,23 +84,13 @@ def agent_chat(request: ChatRequest) -> ChatResponse:
         ) from exc
     except (ValueError, KeyError) as exc:
         raise InvalidRequestError(str(exc)) from exc
+    return ChatResponse.model_validate(turn)
 
-    safety = result.get("safety_decision") or {}
-    if result.get("conflicts") or result.get("status") in {
-        "PAUSED_FOR_CONFLICT_VERIFICATION",
-        "SAFE_TERMINAL_VERIFICATION_REQUIRED",
-    }:
-        message = (
-            safety.get("clarification_question")
-            or "Conflicting or insufficient evidence detected; field verification is required before staging an advisory."
-        )
-    else:
-        message = "I found grounded evidence and prepared an advisory for your review."
-    return ChatResponse(
-        message=message,
-        question=request.message,
-        run=AgentRunResponse.model_validate(result),
-    )
+
+@router.get("/api/agent/sessions/{session_id}")
+def get_session(session_id: str) -> dict[str, object]:
+    """Return persisted conversation session context and turn history."""
+    return get_conversation_session(session_id)
 
 
 @router.post("/api/agent/decide", response_model=DecisionResponse)
