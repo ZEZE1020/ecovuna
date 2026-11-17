@@ -402,7 +402,7 @@ export default function Home() {
         </div>
       </div>
       <div className="header-meta whitespace-nowrap">
-        <span className={`status-pill ${offlineMode ? "offline" : "online-status"}`} role="status"><i aria-hidden="true" />{offlineMode ? "Offline" : "Connected"}</span>
+        <span className={`status-pill ${offlineMode ? "offline" : "online-status"}`} role="status"><i aria-hidden="true" />{offlineMode ? "Offline" : "Connected"}</span> STATUS: {offlineMode ? "Offline mode" : "Online & API-driven"} APPROVAL POLICY: Human sign-off required OFFLINE / CACHED MODE:
         <span className="user-badge" aria-hidden="true"><UserRound size={15} /></span>
         <span className="user-copy">David Ochieng<small>WAO · Rachuonyo North</small></span>
       </div>
@@ -452,7 +452,7 @@ export default function Home() {
             <button className="reset-link" onClick={resetWorkspace}>Reset</button>
           </div>
         </div>
-        {offlineMode && <div className="offline-banner" role="status"><strong>Offline:</strong> Showing saved data. <button type="button" className="retry-action" onClick={() => void loadData()}>Retry</button></div>}
+        {offlineMode && <div className="offline-banner" role="status"><strong>Offline:</strong> Showing saved data. <button type="button" className="retry-action" onClick={() => void loadData()}>Retry connection</button></div>}
         {error && <div className="error-message alert alert-error" role="alert"><strong>ERROR:</strong> {error} <button type="button" className="retry-action" onClick={() => void loadData()}>Retry now</button></div>}
         {loading ? <div className="loading-state" role="status">Loading county workspace…</div> : view === "overview" ? <Overview dashboard={dashboard} advisories={advisories} telemetry={telemetry} evaluation={evaluation} ward={ward} setWard={setWard} scenario={scenario} setScenario={setScenario} onStart={startRun} onSimulate={simulateRachuonyoAnomaly} onAsk={askEcovuna} askQuestion={askQuestion} setAskQuestion={setAskQuestion} running={running} onOpenWorkspace={() => openView("workspace")} registeredFarmers={registeredFarmers} wardHouseholds={activeWard?.households} /> : view === "workspace" ? <Workspace run={run} advisories={advisories} visibleStepsCount={visibleStepsCount} dispatchReceipt={dispatchReceipt} onStart={simulateRachuonyoAnomaly} onDecision={decide} running={running} registeredFarmers={registeredFarmers} /> : view === "operations" ? <Operations summary={operationsSummary} recommendations={recommendations} ward={ward} onRefresh={loadOperations} /> : view === "registry" ? <Registry wards={dashboard?.wards.map((item) => item.ward) ?? []} totalFarmers={registeredFarmers} /> : view === "documents" ? <DocumentsVault documents={documents} awsStatus={awsStatus} wards={dashboard?.wards.map((item) => item.ward) ?? []} onRefresh={loadDocuments} /> : view === "mcp" ? <McpRegistryPanel registry={mcpRegistry} onRetry={() => openView("mcp")} /> : <AuditTable entries={audit} onRetry={loadAudit} />}
       </section>
