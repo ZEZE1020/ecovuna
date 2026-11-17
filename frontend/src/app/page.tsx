@@ -1,8 +1,8 @@
 "use client";
 
 
-import { useEffect, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ChangeEvent, FormEvent, ReactNode } from "react";
 import {
   Activity, Check, CircleAlert, ClipboardCheck, Clock3, Database, Leaf,
   FileSearch, Flag, LockKeyhole, Play, Radar, ShieldCheck, Sparkles,
@@ -920,6 +920,20 @@ function DocumentsVault({ documents, awsStatus, wards, onRefresh }: { documents:
   const [content, setContent] = useState("KALRO Maize Pest & Drought Protocol (Section 4.2, p.14) — KALRO-HB-2026-01 & KMD-2026-10-14: In Rachuonyo North when soil moisture drops >25% and Fall Armyworm thermal threshold is crossed, hold nitrogen top-dressing and apply root-zone hydrogel (5 kg/acre) + targeted biocontrol.");
   const [uploading, setUploading] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pickedFileName, setPickedFileName] = useState("");
+
+  async function handlePickedFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setPickedFileName(file.name);
+    const text = await file.text();
+    setContent(text);
+    setFilename(file.name);
+    if (!title.trim()) {
+      setTitle(file.name.replace(/\.[a-zA-Z0-9]+$/, "").replace(/[-_]+/g, " ").trim());
+    }
+  }
 
   async function handleUpload(event: FormEvent) {
     event.preventDefault();
@@ -956,6 +970,10 @@ function DocumentsVault({ documents, awsStatus, wards, onRefresh }: { documents:
         <label>Publisher<input required value={publisher} onChange={(e) => setPublisher(e.target.value)} /></label>
         <label>Ward<select value={ward} onChange={(e) => setWard(e.target.value)}>{(wards.length ? wards : ["Rachuonyo North", "Homa Bay Central", "Ndhiwa", "Suba South"]).map((w) => <option key={w}>{w}</option>)}</select></label>
         <label>Filename<input required value={filename} onChange={(e) => setFilename(e.target.value)} /></label>
+        <label>Upload local agronomy file (MD/TXT) — auto-fills protocol excerpt
+          <input ref={fileInputRef} type="file" accept=".md,.markdown,.txt,.mdx,.text,.csv" onChange={handlePickedFile} />
+          {pickedFileName ? <small style={{ display: "block", marginTop: "4px", color: "#1f3040" }}>Ready: {pickedFileName}</small> : null}
+        </label>
         <label>Protocol excerpt<textarea required rows={4} style={{ width: "100%", marginTop: "5px", padding: "9px", border: "1px solid #cbd7de", borderRadius: "4px" }} value={content} onChange={(e) => setContent(e.target.value)} /></label>
         <button className="command-run" type="submit" disabled={uploading}>{uploading ? "Uploading…" : "Upload & Index"}</button>
         {statusMsg && <div className="operation-message">{statusMsg}</div>}
