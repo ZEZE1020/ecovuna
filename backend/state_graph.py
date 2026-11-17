@@ -225,11 +225,18 @@ def _plan_node(state: AgentState) -> AgentState:
 
 
 def _plan_and_fetch(state: AgentState) -> AgentState:
-    from .mcp_server import fetch_kijanibox_telemetry, fetch_open_meteo_context
+    from .mcp_server import (
+        fetch_kijanibox_telemetry,
+        fetch_open_meteo_context,
+        fetch_ward_telemetry,
+    )
 
     scenario = state.get("scenario_override", "").lower()
     if "simulate_timeout" in scenario:
         raise TimeoutError("Simulated telemetry provider timeout")
+
+    ward_telemetry = fetch_ward_telemetry(state["ward"], state["run_id"])
+    _trace(state, "plan_and_fetch", "fetch_ward_telemetry", ward_telemetry)
 
     telemetry = fetch_kijanibox_telemetry(state["ward"], state["run_id"])
     state["telemetry"] = telemetry
@@ -291,7 +298,12 @@ def _recover_node(state: AgentState) -> AgentState:
 
 def _citation_self_check(state: AgentState) -> AgentState:
     from .mcp_client import BORROWED_SERVER_ID, call_borrowed_reference_server
-    from .mcp_server import fetch_kalro_guidelines
+    from .mcp_server import (
+        draft_localized_advisory,
+        fetch_kalro_guidelines,
+        prepare_evoucher_batch,
+        search_agronomy_protocols,
+    )
     from .research_connectors import gather_research_bundle
     from .safety import detect_signal_conflicts
 
@@ -314,6 +326,21 @@ def _citation_self_check(state: AgentState) -> AgentState:
     )
     _trace(state, "citation_self_check", "fetch_kalro_guidelines", guideline)
     state["guideline"] = guideline
+
+    rag_protocol = search_agronomy_protocols(
+        crop="Maize WH-505",
+        symptom=anomaly,
+        ward_id=state["ward"],
+        run_id=state["run_id"],
+    )
+    _trace(state, "citation_self_check", "search_agronomy_protocols", rag_protocol)
+
+    evoucher_batch = prepare_evoucher_batch(
+        ward_id=state["ward"],
+        intervention_type=anomaly,
+        run_id=state["run_id"],
+    )
+    _trace(state, "citation_self_check", "prepare_evoucher_batch", evoucher_batch)
 
     borrowed_ref = call_borrowed_reference_server(
         "file://data/kalro_bulletins/homabay_agronomy_2026.md",
@@ -420,6 +447,13 @@ def _citation_self_check(state: AgentState) -> AgentState:
         "voucher_total_kes": 1800.0,
         "citations": citations,
     }
+    localized_draft = draft_localized_advisory(
+        findings={"ward_id": state["ward"], "voucher_code": voucher},
+        citations=citations,
+        languages=["sw", "luo", "en"],
+        run_id=state["run_id"],
+    )
+    _trace(state, "citation_self_check", "draft_localized_advisory", localized_draft)
     state.setdefault("evidence", {})["citations"] = citations
     state["_next_transition"] = "success"
     return state
@@ -448,7 +482,14 @@ def _stage_write_action(state: AgentState) -> AgentState:
 
 
 def _human_approval_gate(state: AgentState) -> AgentState:
+    from .mcp_server import request_wao_approval
+
     advisory = state.get("advisory") or {}
+    wao_req = request_wao_approval(
+        triage_id=state["run_id"],
+        summary=f"Awaiting WAO approval for {state.get('ward')} ({advisory.get('evoucher_package_code')})",
+    )
+    _trace(state, "human_approval", "request_wao_approval", wao_req)
     approval_payload = {
         "status": "PENDING_WAO_APPROVAL",
         "gate": "WAO_HITL_GATE",

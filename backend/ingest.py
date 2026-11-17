@@ -8,12 +8,42 @@ from pathlib import Path
 
 from .db import connect, initialize, insert_json
 
-WARDS = ("Homa Bay Central", "Ndhiwa", "Suba South", "Karachuonyo")
+WARDS = (
+    "Homa Bay Central",
+    "Ndhiwa",
+    "Suba South",
+    "Karachuonyo",
+    "Rachuonyo North",
+)
 CROPS = ("Maize WH-505", "Sorghum Gadam", "Beans Rosecoco")
 STAGES = ("Germination_0_14d", "Vegetative_15_40d", "Flowering_Tasseling_41_65d")
 
 
 def _telemetry(ward: str, index: int) -> dict[str, object]:
+    if ward == "Rachuonyo North":
+        return {
+            "ward": ward,
+            "sensor_id": "KJB-HB-04",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "soil_moisture_pct": 13.4,
+            "soil_temp_c": 29.8,
+            "precipitation_7d_mm": 6.5,
+            "rainfall_anomaly_mm": -28.0,
+            "raw_payload_json": {
+                "source": "KijaniBox IoT + Sentinel-2 NDVI",
+                "moisture_delta_pct": -28.0,
+                "ndvi_anomaly_status": "SEVERE_DEFICIT (-0.24 NDVI)",
+                "pest_thermal_alert": "Fall Armyworm (Spodoptera frugiperda) thermal threshold crossed",
+                "registered_smallholders": 1850,
+                "lead_persona": "Mama Atieno",
+                "wao_officer": "David Ochieng — WAO-HB-014",
+                "vegetation_indices": {
+                    "NDVI": 0.31,
+                    "vegetation_health_index": 38,
+                    "vegetation_condition_index": 34,
+                },
+            },
+        }
     moisture = (18.0 + index * 1.7) if ward != "Ndhiwa" else 42.0
     return {
         "ward": ward, "sensor_id": f"KJB-HB-{index + 1:02d}",
@@ -21,14 +51,26 @@ def _telemetry(ward: str, index: int) -> dict[str, object]:
         "soil_moisture_pct": moisture, "soil_temp_c": 25.4,
         "precipitation_7d_mm": 12.0 if ward != "Ndhiwa" else 88.0,
         "rainfall_anomaly_mm": -31.0 if ward != "Ndhiwa" else 44.0,
-        "raw_payload_json": {"source": "offline_fixture", "synthetic": True},
+        "raw_payload_json": {
+            "source": "offline_fixture",
+            "synthetic": True,
+            "moisture_delta_pct": -18.0 if ward != "Ndhiwa" else 24.0,
+            "ndvi_anomaly_status": "MODERATE_STRESS" if ward != "Ndhiwa" else "WATERLOGGED_LOWLAND",
+            "registered_smallholders": 1850,
+            "vegetation_indices": {
+                "NDVI": 0.44 if ward != "Ndhiwa" else 0.52,
+                "vegetation_health_index": 54,
+            },
+        },
     }
 
 
 def seed_registry() -> None:
     with connect() as db:
-        for index in range(24):
-            ward = WARDS[index // 6]
+        db.execute("DELETE FROM plots")
+        db.execute("DELETE FROM farmers")
+        for index in range(18):
+            ward = WARDS[index // 5]
             farmer_id = f"SYNTH-HB-{index + 1:03d}"
             plot_id = f"PLOT-HB-{101 + index}"
             insert_json(db, "farmers", {
@@ -47,6 +89,38 @@ def seed_registry() -> None:
                 "repayment_score": 72 + index % 25,
                 "subsidy_tier_eligible": "TIER_A_FULL" if index % 2 == 0 else "TIER_B_PARTIAL",
             })
+        # Seed flagship Rachuonyo North persona (Mama Atieno & cohort representing 1,850 smallholders)
+        rachuonyo_personas = [
+            ("FRM-RN-001", "Mama Atieno", "+254722841901", "Dholuo", "PLOT-RN-201", "Vegetative_15_40d", 2.5),
+            ("FRM-RN-002", "John Odhiambo", "+254722841902", "Swahili", "PLOT-RN-202", "Germination_0_14d", 1.8),
+            ("FRM-RN-003", "Beatrice Auma", "+254722841903", "Dholuo", "PLOT-RN-203", "Flowering_Tasseling_41_65d", 3.0),
+            ("FRM-RN-004", "Samuel Onyango", "+254722841904", "English", "PLOT-RN-204", "Vegetative_15_40d", 1.5),
+            ("FRM-RN-005", "Millicent Akinyi", "+254722841905", "Dholuo", "PLOT-RN-205", "Germination_0_14d", 2.0),
+            ("FRM-RN-006", "Patrick Owino", "+254722841906", "Swahili", "PLOT-RN-206", "Vegetative_15_40d", 2.2),
+        ]
+        for fid, name, phone, lang, pid, stage, acres in rachuonyo_personas:
+            insert_json(db, "farmers", {
+                "farmer_id": fid,
+                "full_name": name,
+                "phone_number": phone,
+                "ward": "Rachuonyo North",
+                "agroclimatic_zone": "LM3",
+                "cooperative_name": "Rachuonyo North Smallholders Union (1,850 members)",
+                "preferred_language": lang,
+            })
+            insert_json(db, "plots", {
+                "plot_id": pid,
+                "farmer_id": fid,
+                "latitude": -0.3812,
+                "longitude": 34.6341,
+                "crop_type": "Maize WH-505",
+                "planting_date": str(date(2026, 10, 1)),
+                "current_growth_stage": stage,
+                "acreage": acres,
+                "kijanibox_sensor_id": "KJB-HB-04",
+                "repayment_score": 88,
+                "subsidy_tier_eligible": "TIER_A_FULL",
+            })
         for index, ward in enumerate(WARDS):
             insert_json(db, "telemetry_cache", _telemetry(ward, index))
         partners = [
@@ -54,6 +128,7 @@ def seed_registry() -> None:
             ("AGV-NDW-001", "Ndhiwa Agri Input Centre", "AGROVET", "Ndhiwa", -0.4080, 34.3700, 22.0, "Peter Ouma", "+254700000102"),
             ("FRT-SUB-001", "Lake Victoria Soil & Fertility Co-op", "FERTILISER", "Suba South", -0.4800, 34.2000, 30.0, "Akinyi Odhiambo", "+254700000103"),
             ("SED-KAR-001", "Karachuonyo Certified Seed Hub", "SEED", "Karachuonyo", -0.6200, 34.6000, 25.0, "Tom Otieno", "+254700000104"),
+            ("AGV-RN-001", "Kendu Bay Agro-Dealer & E-Voucher Hub", "AGROVET", "Rachuonyo North", -0.3812, 34.6341, 28.0, "Mama Atieno Co-op Desk", "+254700000105"),
         ]
         for partner in partners:
             insert_json(db, "partners", {

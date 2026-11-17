@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .db import connect, initialize, insert_json
+from .db import connect, initialize, insert_json, sync_dynamodb_tables
 from .mcp_server import (
     SERVER_CAPABILITIES,
     SERVER_ID,
@@ -249,6 +249,13 @@ def discover_mcp_runtime() -> dict[str, Any]:
             )
         ]
 
+    sync_dynamodb_tables(
+        tool_registry={
+            "id": "ecovuna-fastmcp-registry",
+            "servers_count": len(servers),
+            "tools": [t["name"] for t in project_tools],
+        }
+    )
     return {
         "servers": servers,
         "recent_activity": activity,

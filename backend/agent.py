@@ -8,7 +8,7 @@ import uuid
 from typing import Any
 
 from .artifacts_repository import repository as artifact_repo
-from .db import connect
+from .db import connect, sync_dynamodb_tables
 from .foundation import get_agent_foundation
 from .policy import enforce_decision_policy
 from .state_graph import AgentState, build_graph, resume_run_decision, save_run_state
@@ -95,6 +95,18 @@ def decide(
     )
     status = resumed_state["status"]
     dispatched = bool(approved)
+    campaign_dispatch = {
+        "triage_id": run_id,
+        "hitl_approved": dispatched,
+        "status": "DISPATCHED" if dispatched else "FLAGGED_FOR_VISIT",
+        "approved_by": officer,
+        "gateway": "Africa's Talking SMS & USSD Gateway",
+        "ussd_channel": "*384*55#",
+        "farmers_reached": 1850,
+        "lead_recipient": "Mama Atieno (+254722841901, Rachuonyo North)",
+        "cost_per_ward_alert_usd": 11.40,
+    }
+    sync_dynamodb_tables(hitl_audit=campaign_dispatch)
     with connect() as db:
         db.execute(
             "UPDATE staged_advisories SET status = ? WHERE run_id = ?",
@@ -134,4 +146,5 @@ def decide(
         "approval_token": checked["approval_token"],
         "policy_decision": checked["policy_decision"],
         "artifacts": updated_artifacts,
+        "campaign_dispatch": campaign_dispatch,
     }

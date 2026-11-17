@@ -22,7 +22,6 @@ dependencies = [
   "langchain-core>=0.3",
   "langchain-ollama>=0.2",
   "langchain-google-genai>=2.0",
-  "google-cloud-firestore>=2.16",
 ]
 
 [tool.uv]

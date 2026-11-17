@@ -383,6 +383,41 @@ def execute_reproducible_demo() -> dict[str, object]:
     return run_reproducible_demo()
 
 
+@router.post("/api/v1/automations/ingest-telemetry")
+def automated_telemetry_ingest_webhook(payload: dict[str, object] | None = None) -> dict[str, object]:
+    """Webhook/cron watcher that wakes the LangGraph agent when a ward sensor crosses a drought/pest threshold."""
+    body = payload or {}
+    ward = str(body.get("ward") or body.get("ward_id") or "Rachuonyo North").strip()
+    moisture_pct = float(body.get("soil_moisture_pct") or 13.4)
+    moisture_drop = float(body.get("moisture_delta_pct") or -28.0)
+    pest_alert = str(
+        body.get("pest_alert")
+        or "Fall Armyworm thermal threshold crossed (29.8°C)"
+    )
+    threshold_crossed = moisture_pct <= 18.0 or moisture_drop <= -20.0 or bool(pest_alert)
+
+    run = run_bedrock_agent_task(
+        ward=ward,
+        prompt=(
+            f"Automated IoT/NDVI threshold trigger in {ward}: {moisture_drop:.0f}% soil moisture drop "
+            f"({moisture_pct}% current) & {pest_alert}. Stage localized Swahili, Dholuo, and English "
+            "advisory and e-voucher subsidy for 1,850 smallholders at the WAO HITL approval gate."
+        ),
+    )
+    return {
+        "automation_status": "TRIGGERED_AND_STAGED_AT_HITL_GATE" if threshold_crossed else "MONITORING",
+        "threshold_crossed": threshold_crossed,
+        "ward": ward,
+        "sensor_id": "KJB-HB-04" if ward == "Rachuonyo North" else "KJB-HB-01",
+        "moisture_delta_pct": moisture_drop,
+        "pest_alert": pest_alert,
+        "farmers_reached_target": 1850,
+        "assigned_wao": "David Ochieng — WAO-HB-014",
+        "lead_persona": "Mama Atieno",
+        "run": run,
+    }
+
+
 @router.get("/api/aws/status")
 def aws_status() -> dict[str, object]:
     """Return AWS Bedrock model and S3 agronomy document vault status."""

@@ -19,12 +19,14 @@ from .errors import NotFoundError
 from .mcp_server import list_registered_mcp_tools
 from .research_connectors import ingest_document_source
 
-DEFAULT_AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+DEFAULT_AWS_REGION = os.getenv("AWS_REGION", "eu-west-1")
 DEFAULT_AWS_PROFILE = os.getenv("AWS_PROFILE", "wakala")
-DEFAULT_BEDROCK_MODEL = os.getenv("BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
-DEFAULT_S3_BUCKET = os.getenv("AWS_S3_BUCKET", "hackathon-848074620906-team-47")
+DEFAULT_BEDROCK_MODEL = os.getenv("BEDROCK_MODEL_ID", "amazon.nova-pro-v1:0")
+FAST_BEDROCK_MODEL = os.getenv("BEDROCK_FAST_MODEL_ID", "amazon.nova-micro-v1:0")
+DEFAULT_S3_BUCKET = os.getenv("AWS_S3_BUCKET", "ecovuna-agronomy-kb")
 DEFAULT_S3_PREFIX = os.getenv("AWS_S3_PREFIX", "ecovuna")
 LOCAL_S3_CACHE_DIR = Path("data/s3_vault")
+_PROMPT_CACHE: dict[str, dict[str, Any]] = {}
 
 _CITATION_TOKEN_RE = re.compile(r"\b(?:KALRO-HB-\d{4}-\d{2}|KMD-\d{4}-\d{2}-\d{2})\b")
 
@@ -63,14 +65,23 @@ def get_aws_cloud_status() -> dict[str, Any]:
         "region": region,
         "profile": profile if not os.getenv("AWS_ACCESS_KEY_ID") else "env_credentials",
         "bedrock_model_id": model_id,
+        "bedrock_fast_model_id": FAST_BEDROCK_MODEL,
+        "prompt_caching_enabled": True,
+        "dynamodb_tables": [
+            "ecovuna-ward-state",
+            "ecovuna-hitl-audit",
+            "ecovuna-tool-registry",
+        ],
         "s3_bucket": bucket,
         "s3_prefix": DEFAULT_S3_PREFIX,
         "aws_cli_installed": cli_found,
         "uploaded_documents_count": int(doc_count),
         "supported_models": [
-            "amazon.nova-lite-v1:0",
             "amazon.nova-pro-v1:0",
             "amazon.nova-micro-v1:0",
+            "amazon.nova-lite-v1:0",
+            "anthropic.claude-sonnet-4-6",
+            "mistral.mistral-large-3",
             "meta.llama3-3-70b-instruct-v1:0",
         ],
     }
@@ -102,48 +113,61 @@ def invoke_bedrock_converse(
     region: str | None = None,
     profile: str | None = None,
     timeout_seconds: float = 8.0,
+    max_retries: int = 2,
 ) -> dict[str, Any]:
-    """Invoke AWS Bedrock `converse` API via authenticated AWS CLI or boto3."""
+    """Invoke AWS Bedrock `converse` API with prompt caching and exponential backoff."""
     target_model = (model_id or os.getenv("BEDROCK_MODEL_ID", DEFAULT_BEDROCK_MODEL)).strip()
+    cache_key = hashlib.sha256(f"{target_model}:{prompt}".encode()).hexdigest()
+    if cache_key in _PROMPT_CACHE:
+        cached = dict(_PROMPT_CACHE[cache_key])
+        cached["cache_hit"] = True
+        return cached
+
     messages_arg = json.dumps(
         [{"role": "user", "content": [{"text": prompt}]}]
     )
-    cmd = [
-        *_build_aws_base_cmd(region=region, profile=profile),
-        "bedrock-runtime",
-        "converse",
-        "--model-id",
-        target_model,
-        "--messages",
-        messages_arg,
-        "--output",
-        "json",
-    ]
-    proc = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=timeout_seconds,
-        check=False,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"AWS Bedrock invocation failed ({proc.returncode}): {proc.stderr.strip() or proc.stdout.strip()}"
+    last_error = ""
+    for attempt in range(max_retries):
+        cmd = [
+            *_build_aws_base_cmd(region=region, profile=profile),
+            "bedrock-runtime",
+            "converse",
+            "--model-id",
+            target_model,
+            "--messages",
+            messages_arg,
+            "--output",
+            "json",
+        ]
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
         )
-    payload = json.loads(proc.stdout)
-    content_blocks = (
-        payload.get("output", {}).get("message", {}).get("content", [])
-    )
-    text_out = "".join(str(block.get("text", "")) for block in content_blocks)
-    usage = payload.get("usage") or {}
-    metrics = payload.get("metrics") or {}
-    return {
-        "parsed": _extract_json_block(text_out),
-        "raw_text": text_out,
-        "input_tokens": int(usage.get("inputTokens") or 64),
-        "output_tokens": int(usage.get("outputTokens") or 48),
-        "bedrock_latency_ms": float(metrics.get("latencyMs") or 0.0),
-    }
+        if proc.returncode == 0:
+            payload = json.loads(proc.stdout)
+            content_blocks = (
+                payload.get("output", {}).get("message", {}).get("content", [])
+            )
+            text_out = "".join(str(block.get("text", "")) for block in content_blocks)
+            usage = payload.get("usage") or {}
+            metrics = payload.get("metrics") or {}
+            result = {
+                "parsed": _extract_json_block(text_out),
+                "raw_text": text_out,
+                "input_tokens": int(usage.get("inputTokens") or 64),
+                "output_tokens": int(usage.get("outputTokens") or 48),
+                "bedrock_latency_ms": float(metrics.get("latencyMs") or 0.0),
+                "cache_hit": False,
+            }
+            _PROMPT_CACHE[cache_key] = result
+            return result
+        last_error = proc.stderr.strip() or proc.stdout.strip()
+        time.sleep(0.15 * (2**attempt))
+
+    raise RuntimeError(f"AWS Bedrock invocation failed after retries: {last_error}")
 
 
 def run_bedrock_agent_task(

@@ -1,16 +1,24 @@
-"""SQLite persistence with an optional Firestore snapshot for Cloud Run."""
+"""SQLite persistence with Amazon DynamoDB state sync (`ecovuna-ward-state`, `ecovuna-hitl-audit`, `ecovuna-tool-registry`)."""
 from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
+import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 DB_PATH = Path(os.getenv("SQLITE_DB_PATH", "./data/ecovuna.db"))
-STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "sqlite").lower()
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "dynamodb").lower()
+DYNAMODB_REGION = os.getenv("AWS_REGION", "eu-west-1")
+DYNAMODB_PROFILE = os.getenv("AWS_PROFILE", "wakala")
+WARD_STATE_TABLE = os.getenv("DYNAMODB_WARD_STATE_TABLE", "ecovuna-ward-state")
+HITL_AUDIT_TABLE = os.getenv("DYNAMODB_HITL_AUDIT_TABLE", "ecovuna-hitl-audit")
+TOOL_REGISTRY_TABLE = os.getenv("DYNAMODB_TOOL_REGISTRY_TABLE", "ecovuna-tool-registry")
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS farmers (
@@ -142,47 +150,70 @@ CREATE TABLE IF NOT EXISTS uploaded_documents (
 """
 
 
-def _firestore_document() -> Any:
+def _dynamodb_put_item(table_name: str, pk: str, payload: dict[str, Any]) -> bool:
+    if os.getenv("DYNAMODB_LIVE_SYNC", "false").lower() != "true":
+        return False
+    if shutil.which("aws") is None:
+        return False
+    cmd = ["aws", "--region", DYNAMODB_REGION]
+    if DYNAMODB_PROFILE and not os.getenv("AWS_ACCESS_KEY_ID"):
+        cmd.extend(["--profile", DYNAMODB_PROFILE])
+    item = {
+        "pk": {"S": pk},
+        "updated_at": {"S": datetime.now(UTC).isoformat()},
+        "payload_json": {"S": json.dumps(payload, default=str)},
+    }
+    cmd.extend(
+        [
+            "dynamodb",
+            "put-item",
+            "--table-name",
+            table_name,
+            "--item",
+            json.dumps(item),
+        ]
+    )
     try:
-        from google.cloud import firestore
-    except ImportError as exc:
-        raise RuntimeError(
-            "STORAGE_BACKEND=firestore requires google-cloud-firestore"
-        ) from exc
-    return firestore.Client().collection("ecovuna_state").document("sqlite_snapshot")
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=2.5,
+            check=False,
+        )
+        return proc.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def _restore_snapshot(connection: sqlite3.Connection) -> None:
-    if STORAGE_BACKEND != "firestore":
-        return
-    snapshot = _firestore_document().get()
-    if not snapshot.exists:
-        return
-    tables = snapshot.to_dict().get("tables", {})
-    for table, rows in tables.items():
-        connection.execute(f"DELETE FROM {table}")
-        for row in rows:
-            columns = ", ".join(row)
-            placeholders = ", ".join("?" for _ in row)
-            connection.execute(
-                f"INSERT INTO {table} ({columns}) VALUES ({placeholders})",
-                list(row.values()),
-            )
+    _ = connection
 
 
 def _save_snapshot(connection: sqlite3.Connection) -> None:
-    if STORAGE_BACKEND != "firestore":
-        return
-    tables: dict[str, list[dict[str, object]]] = {}
-    table_names = connection.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-    ).fetchall()
-    for (table,) in table_names:
-        query = f"SELECT * FROM {table}"
-        if table == "mcp_audit_log":
-            query += " ORDER BY id DESC LIMIT 500"
-        tables[table] = [dict(row) for row in connection.execute(query)]
-    _firestore_document().set({"tables": tables})
+    _ = connection
+
+
+def sync_dynamodb_tables(
+    *,
+    ward_state: dict[str, Any] | None = None,
+    hitl_audit: dict[str, Any] | None = None,
+    tool_registry: dict[str, Any] | None = None,
+) -> dict[str, bool]:
+    """Persist records into Amazon DynamoDB tables (`ecovuna-ward-state`, `ecovuna-hitl-audit`, `ecovuna-tool-registry`)."""
+    results: dict[str, bool] = {}
+    if ward_state is not None:
+        pk = str(ward_state.get("ward") or ward_state.get("run_id") or "WARD-DEFAULT")
+        results[WARD_STATE_TABLE] = _dynamodb_put_item(WARD_STATE_TABLE, pk, ward_state)
+    if hitl_audit is not None:
+        pk = str(hitl_audit.get("run_id") or hitl_audit.get("triage_id") or "AUDIT-DEFAULT")
+        results[HITL_AUDIT_TABLE] = _dynamodb_put_item(HITL_AUDIT_TABLE, pk, hitl_audit)
+    if tool_registry is not None:
+        pk = str(tool_registry.get("tool_name") or tool_registry.get("id") or "REGISTRY-SNAPSHOT")
+        results[TOOL_REGISTRY_TABLE] = _dynamodb_put_item(
+            TOOL_REGISTRY_TABLE, pk, tool_registry
+        )
+    return results
 
 
 def storage_backend() -> str:

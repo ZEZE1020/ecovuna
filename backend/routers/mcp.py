@@ -29,6 +29,7 @@ def mcp_registry() -> McpRegistryResponse:
 
 
 @router.get("/api/mcp/tools")
+@router.get("/mcp/tools")
 def mcp_tools() -> dict[str, Any]:
     """List registered MCP tools, descriptions, and JSON input schemas."""
     runtime = discover_mcp_runtime()
@@ -38,6 +39,12 @@ def mcp_tools() -> dict[str, Any]:
     return {
         "tools": all_schemas or list_registered_mcp_tools(),
     }
+
+
+@router.get("/mcp/registry", response_model=McpRegistryResponse)
+def mcp_registry_root() -> McpRegistryResponse:
+    """Expose runtime-discovered MCP servers at /mcp/registry."""
+    return McpRegistryResponse.model_validate(discover_mcp_runtime())
 
 
 @router.post("/api/mcp/call")

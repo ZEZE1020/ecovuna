@@ -18,7 +18,43 @@ def test_aws_status_and_bedrock_agent_task_with_fallback() -> None:
     assert status_resp.status_code == 200
     status_data = status_resp.json()
     assert status_data["provider"] == "aws"
-    assert "amazon.nova-lite-v1:0" in status_data["supported_models"]
+    assert "amazon.nova-pro-v1:0" in status_data["supported_models"]
+    assert "amazon.nova-micro-v1:0" in status_data["supported_models"]
+    assert "ecovuna-ward-state" in status_data["dynamodb_tables"]
+
+    # Automated telemetry ingest webhook for Rachuonyo North
+    auto_resp = client.post(
+        "/api/v1/automations/ingest-telemetry",
+        json={
+            "ward": "Rachuonyo North",
+            "soil_moisture_pct": 13.4,
+            "moisture_delta_pct": -28.0,
+        },
+    )
+    assert auto_resp.status_code == 200
+    assert auto_resp.json()["automation_status"] == "TRIGGERED_AND_STAGED_AT_HITL_GATE"
+    assert auto_resp.json()["lead_persona"] == "Mama Atieno"
+
+    # FastMCP tool registry at /mcp/tools
+    mcp_resp = client.get("/mcp/tools")
+    assert mcp_resp.status_code == 200
+    tool_names = {t["name"] for t in mcp_resp.json()["tools"]}
+    assert {
+        "fetch_ward_telemetry",
+        "search_agronomy_protocols",
+        "draft_localized_advisory",
+        "prepare_evoucher_batch",
+        "request_wao_approval",
+        "dispatch_sms_ussd_campaign",
+    }.issubset(tool_names)
+
+    # Zero-JSON UI audit (no <pre>, <code>, or JSX {JSON.stringify(...)})
+    from pathlib import Path
+
+    page_code = Path("frontend/src/app/page.tsx").read_text(encoding="utf-8")
+    assert "{JSON.stringify" not in page_code
+    assert "<pre" not in page_code
+    assert "<code" not in page_code
 
     # Simulated live Bedrock response
     live_resp = client.post(

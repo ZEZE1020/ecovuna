@@ -77,9 +77,9 @@ jobs:
             --port 8000 \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
             --memory 512Mi \
-            --min-instances 0 \
+            --min-instances 1 \
             --max-instances 2 \
-            --set-env-vars "FRONTEND_ORIGIN=https://${DOMAIN},LLM_PROVIDER=${LLM_PROVIDER:-deterministic_offline},AWS_REGION=${AWS_REGION:-us-east-1},BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID:-amazon.nova-lite-v1:0},AWS_S3_BUCKET=${AWS_S3_BUCKET:-hackathon-848074620906-team-47},STORAGE_BACKEND=firestore,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},RELEASE_VERSION=${RELEASE_TAG}"
+            --set-env-vars "FRONTEND_ORIGIN=https://${DOMAIN},LLM_PROVIDER=${LLM_PROVIDER:-aws_bedrock},AWS_REGION=${AWS_REGION:-eu-west-1},BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID:-amazon.nova-pro-v1:0},AWS_S3_BUCKET=${AWS_S3_BUCKET:-ecovuna-agronomy-kb},STORAGE_BACKEND=dynamodb,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},RELEASE_VERSION=${RELEASE_TAG}"
         env:
           LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
           AWS_REGION: ${{ vars.AWS_REGION }}
@@ -117,7 +117,7 @@ jobs:
             --port 3000 \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
             --memory 512Mi \
-            --min-instances 0 \
+            --min-instances 1 \
             --max-instances 2
 
       - name: Smoke test API and web services
