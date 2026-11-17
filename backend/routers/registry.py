@@ -107,21 +107,37 @@ def telemetry(ward: str | None = None) -> TelemetryResponse:
 
 @router.get("/api/farmers", response_model=list[FarmerResponse])
 def farmers(
-    ward: str | None = None, search: str | None = None
+    ward: str | None = None,
+    search: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> list[FarmerResponse]:
+    """Return a paginated page of the county registry; totals come from /api/dashboard."""
     query = """
         SELECT farmers.*, COUNT(plots.plot_id) AS plot_count
         FROM farmers LEFT JOIN plots ON plots.farmer_id = farmers.farmer_id
         WHERE (? IS NULL OR farmers.ward = ?)
           AND (? IS NULL OR farmers.full_name LIKE ? OR farmers.phone_number LIKE ?)
         GROUP BY farmers.farmer_id ORDER BY farmers.full_name
+        LIMIT ? OFFSET ?
     """
     search_value = f"%{search}%" if search else None
+    page_size = max(1, min(limit, 200))
+    page_offset = max(0, offset)
     with connect() as db:
         return [
             FarmerResponse.model_validate(dict(row))
             for row in db.execute(
-                query, (ward, ward, search_value, search_value, search_value)
+                query,
+                (
+                    ward,
+                    ward,
+                    search_value,
+                    search_value,
+                    search_value,
+                    page_size,
+                    page_offset,
+                ),
             )
         ]
 

@@ -12,7 +12,7 @@ def test_ussd_callback() -> None:
     client = TestClient(app)
     response = client.post(
         "/api/ussd",
-        data={"phoneNumber": "+254712345678", "text": "SYNTH-HB-001"},
+        data={"phoneNumber": "+254712345678", "text": "HB-FRM-0001"},
     )
     assert response.status_code == 200
     assert "CON Your subsidy status is: TIER_A_FULL" in response.text

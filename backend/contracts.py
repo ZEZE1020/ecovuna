@@ -401,6 +401,27 @@ class RecommendationPartnerResponse(BaseModel):
     partner_type: str
 
 
+class PhoneMessage(BaseModel):
+    """A single SMS message in a farmer's inbox."""
+
+    model_config = ConfigDict(extra="allow")
+
+    sender: str
+    timestamp: str
+    text_sw: str
+    text_en: str
+    text_luo: str
+    citation: str
+
+
+class PhoneInboxResponse(BaseModel):
+    """The response from the phone inbox endpoint."""
+
+    model_config = ConfigDict(extra="allow")
+
+    messages: list[PhoneMessage]
+
+
 class RecommendationInputResponse(BaseModel):
     input_id: str
     name: str

@@ -129,6 +129,16 @@ CREATE TABLE IF NOT EXISTS run_tool_events (
   output_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS phone_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  phone_number TEXT NOT NULL,
+  sender TEXT NOT NULL,
+  timestamp TEXT NOT NULL,
+  text_sw TEXT NOT NULL,
+  text_en TEXT NOT NULL,
+  text_luo TEXT NOT NULL,
+  citation TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS uploaded_documents (
   document_id TEXT PRIMARY KEY,
   title TEXT NOT NULL,

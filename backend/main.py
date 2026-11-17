@@ -22,6 +22,7 @@ from .routers import (
     mcp_router,
     operations_router,
     registry_router,
+    telco_router,
 )
 
 
@@ -112,6 +113,7 @@ def create_app() -> FastAPI:
     application.include_router(audit_router)
     application.include_router(registry_router)
     application.include_router(operations_router)
+    application.include_router(telco_router)
     return application
 
 

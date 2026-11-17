@@ -15,8 +15,41 @@ WARDS = (
     "Karachuonyo",
     "Rachuonyo North",
 )
+WARD_CENTRES = {
+    "Homa Bay Central": (-0.5273, 34.4571),
+    "Ndhiwa": (-0.4080, 34.3700),
+    "Suba South": (-0.4800, 34.2000),
+    "Karachuonyo": (-0.6200, 34.6000),
+    "Rachuonyo North": (-0.3812, 34.6341),
+}
 CROPS = ("Maize WH-505", "Sorghum Gadam", "Beans Rosecoco")
 STAGES = ("Germination_0_14d", "Vegetative_15_40d", "Flowering_Tasseling_41_65d")
+
+FARMER_COUNT = 1850
+FARMERS_PER_WARD = FARMER_COUNT // len(WARDS)
+
+# Deterministic name pools keep the registry realistic without shipping fixture rows in the UI.
+FIRST_NAMES = (
+    "Atieno", "Beatrice", "John", "Millicent", "Patrick", "Grace", "Samuel",
+    "Rose", "Peter", "Jane", "Michael", "Esther", "Daniel", "Linet", "George",
+    "Mary", "Joseph", "Nancy", "Kevin", "Faith", "Alice", "Christine",
+    "Wycliffe", "Agnes", "Dennis", "Emmanuel", "Caroline", "Maurice",
+    "Judith", "Collins",
+)
+MIDDLE_INITIALS = tuple("ABCDEFGHJKLMNPRSTW")
+SURNAMES = (
+    "Odhiambo", "Auma", "Owino", "Akinyi", "Onyango", "Adhiambo", "Ouma",
+    "Anyango", "Otieno", "Awuor", "Ochieng", "Akoth", "Ogola", "Achieng",
+    "Omondi", "Odera", "Odongo", "Kerubo", "Nyambura", "Owade", "Obonyo",
+    "Oloo", "Okech", "Nyakwar",
+)
+
+
+def _farmer_name(index: int) -> str:
+    first = FIRST_NAMES[index % len(FIRST_NAMES)]
+    middle = MIDDLE_INITIALS[(index // len(FIRST_NAMES)) % len(MIDDLE_INITIALS)]
+    surname = SURNAMES[(index // (len(FIRST_NAMES) * len(MIDDLE_INITIALS))) % len(SURNAMES)]
+    return f"{first} {middle}. {surname}"
 
 
 def _telemetry(ward: str, index: int) -> dict[str, object]:
@@ -34,7 +67,7 @@ def _telemetry(ward: str, index: int) -> dict[str, object]:
                 "moisture_delta_pct": -28.0,
                 "ndvi_anomaly_status": "SEVERE_DEFICIT (-0.24 NDVI)",
                 "pest_thermal_alert": "Fall Armyworm (Spodoptera frugiperda) thermal threshold crossed",
-                "registered_smallholders": 1850,
+                "registered_smallholders": FARMERS_PER_WARD,
                 "lead_persona": "Mama Atieno",
                 "wao_officer": "David Ochieng — WAO-HB-014",
                 "vegetation_indices": {
@@ -56,7 +89,7 @@ def _telemetry(ward: str, index: int) -> dict[str, object]:
             "synthetic": True,
             "moisture_delta_pct": -18.0 if ward != "Ndhiwa" else 24.0,
             "ndvi_anomaly_status": "MODERATE_STRESS" if ward != "Ndhiwa" else "WATERLOGGED_LOWLAND",
-            "registered_smallholders": 1850,
+            "registered_smallholders": FARMERS_PER_WARD,
             "vegetation_indices": {
                 "NDVI": 0.44 if ward != "Ndhiwa" else 0.52,
                 "vegetation_health_index": 54,
@@ -67,68 +100,49 @@ def _telemetry(ward: str, index: int) -> dict[str, object]:
 
 def seed_registry() -> None:
     with connect() as db:
+        db.execute("DELETE FROM farm_assignments")
+        db.execute("DELETE FROM staged_advisories")
+        db.execute("DELETE FROM phone_messages")
+        db.execute("DELETE FROM mcp_audit_log")
         db.execute("DELETE FROM plots")
         db.execute("DELETE FROM farmers")
-        for index in range(18):
-            ward = WARDS[index // 5]
-            farmer_id = f"SYNTH-HB-{index + 1:03d}"
-            plot_id = f"PLOT-HB-{101 + index}"
-            insert_json(db, "farmers", {
-                "farmer_id": farmer_id, "full_name": f"Synthetic Farmer {index + 1:02d}",
-                "phone_number": f"+2547{10000000 + index:08d}", "ward": ward,
-                "agroclimatic_zone": "LM3" if index % 2 else "LM4",
-                "cooperative_name": f"{ward} Growers Cooperative",
-                "preferred_language": ("Swahili", "Dholuo", "English")[index % 3],
-            })
-            insert_json(db, "plots", {
-                "plot_id": plot_id, "farmer_id": farmer_id,
-                "latitude": -0.5273 + index * 0.001, "longitude": 34.4571 + index * 0.001,
-                "crop_type": CROPS[index % len(CROPS)], "planting_date": str(date(2026, 10, 1)),
-                "current_growth_stage": STAGES[index % len(STAGES)], "acreage": 1.0 + (index % 3) * 0.5,
-                "kijanibox_sensor_id": f"KJB-HB-{index // 2 + 1:02d}",
-                "repayment_score": 72 + index % 25,
-                "subsidy_tier_eligible": "TIER_A_FULL" if index % 2 == 0 else "TIER_B_PARTIAL",
-            })
-        # Seed flagship Rachuonyo North persona (Mama Atieno & cohort representing 1,850 smallholders)
-        rachuonyo_personas = [
-            ("FRM-RN-001", "Mama Atieno", "+254722841901", "Dholuo", "PLOT-RN-201", "Vegetative_15_40d", 2.5),
-            ("FRM-RN-002", "John Odhiambo", "+254722841902", "Swahili", "PLOT-RN-202", "Germination_0_14d", 1.8),
-            ("FRM-RN-003", "Beatrice Auma", "+254722841903", "Dholuo", "PLOT-RN-203", "Flowering_Tasseling_41_65d", 3.0),
-            ("FRM-RN-004", "Samuel Onyango", "+254722841904", "English", "PLOT-RN-204", "Vegetative_15_40d", 1.5),
-            ("FRM-RN-005", "Millicent Akinyi", "+254722841905", "Dholuo", "PLOT-RN-205", "Germination_0_14d", 2.0),
-            ("FRM-RN-006", "Patrick Owino", "+254722841906", "Swahili", "PLOT-RN-206", "Vegetative_15_40d", 2.2),
-        ]
-        for fid, name, phone, lang, pid, stage, acres in rachuonyo_personas:
-            insert_json(db, "farmers", {
-                "farmer_id": fid,
-                "full_name": name,
-                "phone_number": phone,
-                "ward": "Rachuonyo North",
-                "agroclimatic_zone": "LM3",
-                "cooperative_name": "Rachuonyo North Smallholders Union (1,850 members)",
-                "preferred_language": lang,
-            })
-            insert_json(db, "plots", {
-                "plot_id": pid,
-                "farmer_id": fid,
-                "latitude": -0.3812,
-                "longitude": 34.6341,
-                "crop_type": "Maize WH-505",
-                "planting_date": str(date(2026, 10, 1)),
-                "current_growth_stage": stage,
-                "acreage": acres,
-                "kijanibox_sensor_id": "KJB-HB-04",
-                "repayment_score": 88,
-                "subsidy_tier_eligible": "TIER_A_FULL",
-            })
+        db.execute("DELETE FROM partners")
+        db.execute("DELETE FROM inputs")
+        for ward_index, ward in enumerate(WARDS):
+            centre_latitude, centre_longitude = WARD_CENTRES[ward]
+            for local_index in range(FARMERS_PER_WARD):
+                index = ward_index * FARMERS_PER_WARD + local_index
+                farmer_id = f"HB-FRM-{index + 1:04d}"
+                plot_id = f"PLOT-HB-{index + 1:04d}"
+                # Keep the lead persona from the Rachuonyo North field story.
+                is_lead_persona = ward == "Rachuonyo North" and local_index == 0
+                name = "Mama Atieno" if is_lead_persona else _farmer_name(index)
+                insert_json(db, "farmers", {
+                    "farmer_id": farmer_id, "full_name": name,
+                    "phone_number": f"+2547{20000000 + index:08d}", "ward": ward,
+                    "agroclimatic_zone": "LM3" if index % 2 else "LM4",
+                    "cooperative_name": f"{ward} Smallholders Union",
+                    "preferred_language": ("Swahili", "Dholuo", "English")[index % 3],
+                })
+                insert_json(db, "plots", {
+                    "plot_id": plot_id, "farmer_id": farmer_id,
+                    "latitude": round(centre_latitude + ((index % 17) - 8) * 0.006, 5),
+                    "longitude": round(centre_longitude + ((index % 13) - 6) * 0.006, 5),
+                    "crop_type": CROPS[index % len(CROPS)], "planting_date": str(date(2026, 10, 1)),
+                    "current_growth_stage": STAGES[index % len(STAGES)],
+                    "acreage": 1.0 + (index % 3) * 0.5,
+                    "kijanibox_sensor_id": f"KJB-HB-{ward_index + 1:02d}",
+                    "repayment_score": 72 + index % 25,
+                    "subsidy_tier_eligible": "TIER_A_FULL" if index % 2 == 0 else "TIER_B_PARTIAL",
+                })
         for index, ward in enumerate(WARDS):
             insert_json(db, "telemetry_cache", _telemetry(ward, index))
         partners = [
-            ("AGV-HBC-001", "Homa Bay Farmers Supply", "AGROVET", "Homa Bay Central", -0.5273, 34.4571, 18.0, "Mary Achieng", "+254700000101"),
-            ("AGV-NDW-001", "Ndhiwa Agri Input Centre", "AGROVET", "Ndhiwa", -0.4080, 34.3700, 22.0, "Peter Ouma", "+254700000102"),
-            ("FRT-SUB-001", "Lake Victoria Soil & Fertility Co-op", "FERTILISER", "Suba South", -0.4800, 34.2000, 30.0, "Akinyi Odhiambo", "+254700000103"),
-            ("SED-KAR-001", "Karachuonyo Certified Seed Hub", "SEED", "Karachuonyo", -0.6200, 34.6000, 25.0, "Tom Otieno", "+254700000104"),
-            ("AGV-RN-001", "Kendu Bay Agro-Dealer & E-Voucher Hub", "AGROVET", "Rachuonyo North", -0.3812, 34.6341, 28.0, "Mama Atieno Co-op Desk", "+254700000105"),
+            ("PARTNER-001", "Oyugis Agrovet Ltd", "Agro-dealer", "Rachuonyo North", -0.4333, 34.9167, 80.0, "Mary Achieng", "+254700000101"),
+            ("PARTNER-002", "Kendu Bay Farm Supplies", "Agro-dealer", "Rachuonyo North", -0.3812, 34.6341, 80.0, "Peter Ouma", "+254700000102"),
+            ("PARTNER-003", "Rachuonyo Seed & Soil Hub", "Agro-dealer", "Rachuonyo North", -0.4000, 34.6500, 80.0, "Akinyi Odhiambo", "+254700000103"),
+            ("PARTNER-004", "Homa Bay Farmers Cooperative Store", "Cooperative", "Homa Bay Central", -0.5273, 34.4571, 80.0, "Tom Otieno", "+254700000104"),
+            ("PARTNER-005", "Mbita Agri-Inputs", "Agro-dealer", "Suba South", -0.4800, 34.2000, 100.0, "Mama Atieno Co-op Desk", "+254700000105"),
         ]
         for partner in partners:
             insert_json(db, "partners", {
@@ -138,10 +152,14 @@ def seed_registry() -> None:
                 "contact_phone": partner[8],
             })
         inputs = [
-            ("INP-HYDRO-001", "Root-zone hydrogel", "SOIL_AMENDMENT", ["Maize WH-505"], ["sandy", "low_moisture"], ["LM3", "LM4"], "25 kg bag", 300.0, "AGV-HBC-001"),
-            ("INP-FERT-001", "Balanced NPK 17:17:17", "FERTILISER", ["Maize WH-505", "Sorghum Gadam"], ["loam", "low_fertility"], ["LM3", "LM4"], "50 kg bag", 4200.0, "FRT-SUB-001"),
-            ("INP-SEED-001", "Certified drought-tolerant maize seed", "SEED", ["Maize WH-505"], ["sandy", "loam"], ["LM3", "LM4"], "2 kg pack", 650.0, "SED-KAR-001"),
-            ("INP-FUNG-001", "Maize fungicide package", "CROP_PROTECTION", ["Maize WH-505"], ["waterlogged", "loam"], ["LM3", "LM4"], "farm pack", 1800.0, "AGV-NDW-001"),
+            ("INP-HYDRO-001", "Root-zone hydrogel", "SOIL_AMENDMENT", list(CROPS), ["sandy", "loam", "low_moisture", "clay"], ["LM3", "LM4"], "25 kg bag", 300.0, "PARTNER-004"),
+            ("INP-FERT-DAP", "DAP Fertilizer", "FERTILISER", list(CROPS), ["loam", "clay", "low_moisture", "sandy"], ["LM3", "LM4"], "50 kg bag", 3500.0, "PARTNER-001"),
+            ("INP-FERT-UREA", "Urea Fertilizer", "FERTILISER", list(CROPS), ["loam", "sandy", "low_moisture", "clay"], ["LM3", "LM4"], "50 kg bag", 3200.0, "PARTNER-002"),
+            ("INP-FERT-NPK", "Balanced NPK 17:17:17", "FERTILISER", list(CROPS), ["loam", "clay", "sandy"], ["LM3", "LM4"], "50 kg bag", 4200.0, "PARTNER-004"),
+            ("INP-SEED-SORG", "Certified Sorghum Seeds", "SEED", ["Sorghum Gadam"], ["sandy", "loam", "low_moisture", "clay"], ["LM3", "LM4"], "2 kg bag", 800.0, "PARTNER-003"),
+            ("INP-SEED-BEAN", "Certified Bean Seeds", "SEED", ["Beans Rosecoco"], ["loam", "clay", "sandy", "low_moisture"], ["LM3", "LM4"], "1 kg bag", 400.0, "PARTNER-005"),
+            ("INP-SEED-MAIZE", "Certified drought-tolerant maize seed", "SEED", ["Maize WH-505"], ["sandy", "loam", "low_moisture", "clay"], ["LM3", "LM4"], "2 kg pack", 650.0, "PARTNER-003"),
+            ("INP-FUNG-001", "Maize fungicide package", "CROP_PROTECTION", ["Maize WH-505"], ["waterlogged", "loam", "clay"], ["LM3", "LM4"], "farm pack", 1800.0, "PARTNER-002"),
         ]
         for item in inputs:
             insert_json(db, "inputs", {
@@ -174,7 +192,12 @@ def ingest(offline_fallback: bool = False) -> None:
         for index, ward in enumerate(WARDS):
             insert_json(db, "telemetry_cache", _telemetry(ward, index))
     write_bulletin()
-    print(json.dumps({"status": "ok", "offline": offline_fallback, "farmers": 24, "wards": len(WARDS)}))
+    print(json.dumps({
+        "status": "ok",
+        "offline": offline_fallback,
+        "farmers": FARMER_COUNT,
+        "wards": len(WARDS),
+    }))
 
 
 def main() -> None:

@@ -122,64 +122,14 @@ type AwsCloudStatus = { provider: string; region: string; bedrock_model_id: stri
 type DispatchReceipt = { gateway: string; ussd_channel: string; farmers_reached: number; lead_recipient: string; approved_by: string; cost_per_ward_alert_usd: number };
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
-const REGISTERED_FARMERS = 1850;
-
-const KENYAN_FARMER_NAMES = [
-  "Mama Atieno", "Beatrice Auma", "John Odhiambo", "Millicent Akinyi",
-  "Patrick Owino", "Grace Adhiambo", "Samuel Onyango", "Rose Atieno",
-  "Peter Ouma", "Jane Adhiambo", "Michael Otieno", "Esther Anyango",
-  "Daniel Oduor", "Linet Awuor", "George Ochieng", "Mary Akoth",
-  "Joseph Ogola", "Nancy Achieng", "Kevin Omondi", "Faith Nyambura",
-  "Alice Owade", "Tom Mboya", "Christine Odera", "Wycliffe Odongo",
-  "Agnes Kerubo", "Dennis Ochieng",
-];
-
-const VERIFIED_DEALER_MATCHES: Recommendation[] = [
-  { plot_id: "PLOT-RN-201", farmer_id: "FRM-RN-001", ward: "Rachuonyo North", crop_type: "Maize", soil_profile: "Loam", soil_moisture_pct: 65, agroclimatic_zone: "LH2", partner: { partner_id: "PARTNER-001", name: "Oyugis Agrovet Ltd", partner_type: "Agro-dealer" }, input: { input_id: "INPUT-001", name: "DAP Fertilizer", category: "FERTILISER", unit: "50kg bag", price_kes: 3500 }, score: 10, reasons: ["Nearby supplier", "Fits maize"] },
-  { plot_id: "PLOT-RN-202", farmer_id: "FRM-RN-002", ward: "Rachuonyo North", crop_type: "Maize", soil_profile: "Clay", soil_moisture_pct: 55, agroclimatic_zone: "LH2", partner: { partner_id: "PARTNER-002", name: "Kendu Bay Farm Supplies", partner_type: "Agro-dealer" }, input: { input_id: "INPUT-002", name: "Urea Fertilizer", category: "FERTILISER", unit: "50kg bag", price_kes: 3200 }, score: 9, reasons: ["Nearby supplier", "In stock"] },
-  { plot_id: "PLOT-RN-203", farmer_id: "FRM-RN-003", ward: "Rachuonyo North", crop_type: "Sorghum", soil_profile: "Sandy Loam", soil_moisture_pct: 45, agroclimatic_zone: "LH3", partner: { partner_id: "PARTNER-003", name: "Rachuonyo Seed & Soil Hub", partner_type: "Agro-dealer" }, input: { input_id: "INPUT-003", name: "Certified Sorghum Seeds", category: "SEED", unit: "2kg bag", price_kes: 800 }, score: 10, reasons: ["Drought tolerant", "Fits soil"] },
-  { plot_id: "PLOT-RN-204", farmer_id: "FRM-RN-004", ward: "Rachuonyo North", crop_type: "Maize", soil_profile: "Loam", soil_moisture_pct: 60, agroclimatic_zone: "LH2", partner: { partner_id: "PARTNER-004", name: "Homa Bay Farmers Cooperative Store", partner_type: "Cooperative" }, input: { input_id: "INPUT-001", name: "DAP Fertilizer", category: "FERTILISER", unit: "50kg bag", price_kes: 3400 }, score: 8, reasons: ["Verified stock", "Fits maize"] },
-  { plot_id: "PLOT-RN-205", farmer_id: "FRM-RN-005", ward: "Rachuonyo North", crop_type: "Beans", soil_profile: "Clay Loam", soil_moisture_pct: 50, agroclimatic_zone: "LH2", partner: { partner_id: "PARTNER-005", name: "Mbita Agri-Inputs", partner_type: "Agro-dealer" }, input: { input_id: "INPUT-004", name: "Certified Bean Seeds", category: "SEED", unit: "1kg bag", price_kes: 400 }, score: 9, reasons: ["Good soil fit", "High demand"] },
-];
-
-function farmerDisplayNames(farmers: Array<{ farmer_id: string; full_name: string }>) {
-  const used = new Set(farmers.filter((farmer) => !farmer.full_name.startsWith("Synthetic Farmer")).map((farmer) => farmer.full_name));
-  const names = new Map<string, string>();
-  let cursor = 0;
-  for (const farmer of farmers) {
-    if (!farmer.full_name.startsWith("Synthetic Farmer")) {
-      names.set(farmer.farmer_id, farmer.full_name);
-      continue;
-    }
-    let nextName = "";
-    for (let attempt = 0; attempt < KENYAN_FARMER_NAMES.length; attempt += 1) {
-      const candidate = KENYAN_FARMER_NAMES[cursor % KENYAN_FARMER_NAMES.length];
-      cursor += 1;
-      if (!used.has(candidate)) {
-        nextName = candidate;
-        break;
-      }
-    }
-    if (!nextName) nextName = `Farmer ${farmer.farmer_id.slice(-3)}`;
-    used.add(nextName);
-    names.set(farmer.farmer_id, nextName);
-  }
-  return names;
-}
 
 export default function Home() {
   const [view, setView] = useState<"overview" | "workspace" | "operations" | "registry" | "documents" | "mcp" | "audit">("overview");
-  const [dashboard, setDashboard] = useState<Dashboard | null>({
-    counts: { households: 1850, plots: 2100, advisories: 12, pending_advisories: 1 },
-    wards: [
-      { ward: "Rachuonyo North", households: 1850, plots: 2100, soil_moisture_pct: 65, last_telemetry_at: "2024-07-28T10:00:00Z" },
-      { ward: "Homa Bay Central", households: 2500, plots: 3000, soil_moisture_pct: 70, last_telemetry_at: "2024-07-28T10:00:00Z" },
-    ]
-  });
+  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [advisories, setAdvisories] = useState<Advisory[]>([]);
   const [audit, setAudit] = useState<Audit[]>([]);
   const [operationsSummary, setOperationsSummary] = useState<OperationsSummary | null>(null);
-  const [recommendations, setRecommendations] = useState<Recommendation[]>(VERIFIED_DEALER_MATCHES);
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [telemetry, setTelemetry] = useState<TelemetryReading[]>([]);
   const [apiTelemetry, setApiTelemetry] = useState<{ enabled: boolean; exporter: string } | null>(null);
   const [foundation, setFoundation] = useState<AgentFoundation | null>(null);
@@ -200,13 +150,15 @@ export default function Home() {
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    { role: "agent", text: "Hello WAO David Ochieng. Ask me about Rachuonyo North, Mama Atieno's plot, Fall Armyworm thresholds, or dry spell subsidies. I will show my checks and pause for your approval." },
+    { role: "agent", text: "Hello WAO David Ochieng. Ask me about your active ward, current soil moisture, Fall Armyworm thresholds, or dry spell subsidies. I will show my checks and pause for your approval." },
   ]);
   const [chatLoading, setChatLoading] = useState(false);
   const [offlineMode, setOfflineMode] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [toast, setToast] = useState("");
+  const registeredFarmers = dashboard?.counts.households;
+  const activeWard = dashboard?.wards.find((item) => item.ward === ward);
 
   useEffect(() => {
     if (!toast) return;
@@ -287,8 +239,7 @@ export default function Home() {
     ]);
     if (!summaryResponse.ok || !recommendationsResponse.ok) throw new Error("Unable to load extension operations.");
     setOperationsSummary(await summaryResponse.json());
-    const nextRecommendations = await recommendationsResponse.json() as Recommendation[];
-    setRecommendations(nextRecommendations.length > 0 ? nextRecommendations : VERIFIED_DEALER_MATCHES);
+    setRecommendations(await recommendationsResponse.json() as Recommendation[]);
   }
 
   async function loadDocuments() {
@@ -415,7 +366,7 @@ export default function Home() {
     try {
       const response = await fetch(`${API}/api/agent/decide`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ run_id: run.run_id, approved, wao_officer_name: "David Ochieng — WAO-HB-014", notes: approved ? "Approved in Ecovuna Desk for 1,850 Rachuonyo North smallholders." : "Requires field verification." }),
+        body: JSON.stringify({ run_id: run.run_id, approved, wao_officer_name: "David Ochieng — WAO-HB-014", notes: approved ? `Approved in Ecovuna Desk for ${registeredFarmers?.toLocaleString() ?? "the"} ${run.ward} smallholders.` : "Requires field verification." }),
       });
       if (!response.ok) throw new Error((await response.json()).detail ?? "Decision could not be recorded.");
       const decision = await response.json() as { status: string; campaign_dispatch?: DispatchReceipt };
@@ -460,7 +411,7 @@ export default function Home() {
       <strong className="impact-title"><Sparkles size={15} /> Impact</strong>
       <span>Triage <strong>24s vs 4 days</strong></span>
       <span>Cost per alert <strong>$11.40</strong></span>
-      <span>Reached <strong>1,850 farmers</strong></span>
+      <span>Reached <strong>{registeredFarmers !== undefined ? `${registeredFarmers.toLocaleString()} farmers` : "—"}</strong></span>
       <span>Data <strong>AWS DynamoDB + S3</strong></span>
     </div>
     <div className={`agent-layout ${chatOpen ? "chat-open" : ""}`}>
@@ -468,11 +419,11 @@ export default function Home() {
         <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="sidebar-toggle" aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
           {sidebarCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
         </button>
-        <div className="office-card"><span>ACTIVE WARD</span><strong>Rachuonyo North</strong><small>1,850 Registered Farmers</small></div>
+        <div className="office-card"><span>ACTIVE WARD</span><strong>{ward || "—"}</strong><small>{registeredFarmers !== undefined ? `${registeredFarmers.toLocaleString()} Registered Farmers` : "Loading registry…"}</small></div>
         <span className="nav-heading">OPERATIONS</span>
         <NavButton active={view === "overview"} label="Overview" icon={<Radar size={16} />} onClick={() => openView("overview")} />
         <NavButton active={view === "workspace"} label="Agent workspace" icon={<Workflow size={16} />} onClick={() => openView("workspace")} count={dashboard?.counts.pending_advisories} />
-        <NavButton active={view === "registry"} label="Farm registry" icon={<UserPlus size={16} />} onClick={() => openView("registry")} count={REGISTERED_FARMERS} />
+        <NavButton active={view === "registry"} label="Farm registry" icon={<UserPlus size={16} />} onClick={() => openView("registry")} count={registeredFarmers} />
         <NavButton active={view === "documents"} label="Knowledge base" icon={<FileSearch size={16} />} onClick={() => openView("documents")} count={documents.length || awsStatus?.uploaded_documents_count} />
         <NavButton active={view === "operations"} label="Partner matching" icon={<Database size={16} />} onClick={() => openView("operations")} count={operationsSummary?.recommended_assignments} />
         <NavButton active={view === "mcp"} label="Connected tools" icon={<Terminal size={16} />} onClick={() => openView("mcp")} />
@@ -494,7 +445,7 @@ export default function Home() {
           <div>
             <span className="kicker">HOMA BAY COUNTY · FIELD OPERATIONS</span>
             <h1>{view === "overview" ? "Today’s priorities" : view === "workspace" ? "Agent workspace" : view === "operations" ? "Partner matching" : view === "registry" ? "Farm registry" : view === "documents" ? "Agronomy knowledge base" : view === "mcp" ? "Connected tools" : "Approval history"}</h1>
-            <p>{view === "overview" ? "Ward alerts, agent checks, and officer approval in one place." : view === "workspace" ? "Review evidence and approve farmer messages." : view === "operations" ? "Match each farm to a verified local supplier." : view === "registry" ? "1,850 registered farmers across Homa Bay." : view === "documents" ? "Upload KALRO guidance for grounded citations." : view === "mcp" ? "Check connected tools and their health." : "Every approval and tool action, in order."}</p>
+            <p>{view === "overview" ? "Ward alerts, agent checks, and officer approval in one place." : view === "workspace" ? "Review evidence and approve farmer messages." : view === "operations" ? "Match each farm to a verified local supplier." : view === "registry" ? `${registeredFarmers !== undefined ? registeredFarmers.toLocaleString() : "—"} registered farmers across Homa Bay.` : view === "documents" ? "Upload KALRO guidance for grounded citations." : view === "mcp" ? "Check connected tools and their health." : "Every approval and tool action, in order."}</p>
           </div>
           <div className="content-actions">
             <button className="run-button btn btn-primary" onClick={() => void simulateRachuonyoAnomaly()} disabled={running}>✦ {running ? "Analyzing alert…" : "Simulate Ward Alert"}</button>
@@ -503,7 +454,7 @@ export default function Home() {
         </div>
         {offlineMode && <div className="offline-banner" role="status"><strong>Offline:</strong> Showing saved data. <button type="button" className="retry-action" onClick={() => void loadData()}>Retry</button></div>}
         {error && <div className="error-message alert alert-error" role="alert"><strong>ERROR:</strong> {error} <button type="button" className="retry-action" onClick={() => void loadData()}>Retry now</button></div>}
-        {loading ? <div className="loading-state" role="status">Loading county workspace…</div> : view === "overview" ? <Overview dashboard={dashboard} advisories={advisories} telemetry={telemetry} evaluation={evaluation} ward={ward} setWard={setWard} scenario={scenario} setScenario={setScenario} onStart={startRun} onSimulate={simulateRachuonyoAnomaly} onAsk={askEcovuna} askQuestion={askQuestion} setAskQuestion={setAskQuestion} running={running} onOpenWorkspace={() => openView("workspace")} /> : view === "workspace" ? <Workspace run={run} advisories={advisories} visibleStepsCount={visibleStepsCount} dispatchReceipt={dispatchReceipt} onStart={simulateRachuonyoAnomaly} onDecision={decide} running={running} /> : view === "operations" ? <Operations summary={operationsSummary} recommendations={recommendations} ward={ward} onRefresh={loadOperations} /> : view === "registry" ? <Registry wards={dashboard?.wards.map((item) => item.ward) ?? []} /> : view === "documents" ? <DocumentsVault documents={documents} awsStatus={awsStatus} wards={dashboard?.wards.map((item) => item.ward) ?? []} onRefresh={loadDocuments} /> : view === "mcp" ? <McpRegistryPanel registry={mcpRegistry} onRetry={() => openView("mcp")} /> : <AuditTable entries={audit} onRetry={loadAudit} />}
+        {loading ? <div className="loading-state" role="status">Loading county workspace…</div> : view === "overview" ? <Overview dashboard={dashboard} advisories={advisories} telemetry={telemetry} evaluation={evaluation} ward={ward} setWard={setWard} scenario={scenario} setScenario={setScenario} onStart={startRun} onSimulate={simulateRachuonyoAnomaly} onAsk={askEcovuna} askQuestion={askQuestion} setAskQuestion={setAskQuestion} running={running} onOpenWorkspace={() => openView("workspace")} registeredFarmers={registeredFarmers} wardHouseholds={activeWard?.households} /> : view === "workspace" ? <Workspace run={run} advisories={advisories} visibleStepsCount={visibleStepsCount} dispatchReceipt={dispatchReceipt} onStart={simulateRachuonyoAnomaly} onDecision={decide} running={running} registeredFarmers={registeredFarmers} /> : view === "operations" ? <Operations summary={operationsSummary} recommendations={recommendations} ward={ward} onRefresh={loadOperations} /> : view === "registry" ? <Registry wards={dashboard?.wards.map((item) => item.ward) ?? []} totalFarmers={registeredFarmers} /> : view === "documents" ? <DocumentsVault documents={documents} awsStatus={awsStatus} wards={dashboard?.wards.map((item) => item.ward) ?? []} onRefresh={loadDocuments} /> : view === "mcp" ? <McpRegistryPanel registry={mcpRegistry} onRetry={() => openView("mcp")} /> : <AuditTable entries={audit} onRetry={loadAudit} />}
       </section>
     </div>
     <button className="chat-launcher" onClick={() => setChatOpen((open) => !open)} aria-label="Open Ecovuna agent chat"><MessageCircle size={22} /><span>Ask Ecovuna</span></button>
@@ -558,12 +509,11 @@ function McpRegistryPanel({ registry, onRetry }: { registry: McpRegistry | null;
   </div>;
 }
 
-function Registry({ wards }: { wards: string[] }) {
+function Registry({ wards, totalFarmers }: { wards: string[]; totalFarmers?: number }) {
   const [farmers, setFarmers] = useState<Array<{ farmer_id: string; full_name: string; phone_number: string; ward: string; plot_count: number }>>([]);
   const [form, setForm] = useState({ full_name: "", phone_number: "", ward: wards[0] ?? "Rachuonyo North", cooperative_name: "" });
   const [message, setMessage] = useState("");
-  const displayNames = farmerDisplayNames(farmers);
-  async function load() { const response = await fetch(`${API}/api/farmers`); if (response.ok) setFarmers(await response.json()); }
+  async function load() { const response = await fetch(`${API}/api/farmers?limit=30`); if (response.ok) setFarmers(await response.json()); }
   useEffect(() => { if (!form.ward && wards[0]) setForm((current) => ({ ...current, ward: wards[0] })); load(); }, [wards]);
   async function submit(event: FormEvent) {
     event.preventDefault(); setMessage("");
@@ -573,8 +523,8 @@ function Registry({ wards }: { wards: string[] }) {
   }
   return <div className="registry-view">
     <div className="evaluation-strip panel-white">
-      <div><span className="kicker">COUNTY REGISTRY</span><h3>{REGISTERED_FARMERS.toLocaleString()} Registered Farmers</h3><p>Verified smallholder records across Homa Bay.</p></div>
-      <div className="evaluation-score"><strong>{REGISTERED_FARMERS.toLocaleString()}</strong><span>Registered Farmers</span></div>
+      <div><span className="kicker">COUNTY REGISTRY</span><h3>{totalFarmers !== undefined ? totalFarmers.toLocaleString() : "—"} Registered Farmers</h3><p>Verified smallholder records across Homa Bay.</p></div>
+      <div className="evaluation-score"><strong>{totalFarmers !== undefined ? totalFarmers.toLocaleString() : "—"}</strong><span>Registered Farmers</span></div>
     </div>
     <div className="registry-grid">
       <form className="panel-white onboarding-form" onSubmit={submit}>
@@ -587,9 +537,9 @@ function Registry({ wards }: { wards: string[] }) {
         {message && <div className="operation-message">{message}</div>}
       </form>
       <div className="panel-white registry-list">
-        <div className="live-heading"><h2>Registered Farmers</h2><span>{REGISTERED_FARMERS.toLocaleString()} Registered Farmers</span></div>
+        <div className="live-heading"><h2>Registered Farmers</h2><span>Showing {farmers.length} of {totalFarmers !== undefined ? totalFarmers.toLocaleString() : "—"}</span></div>
         {farmers.map((farmer) => <div className="registry-row" key={farmer.farmer_id}>
-          <div><strong>{displayNames.get(farmer.farmer_id) ?? farmer.full_name}</strong><span>{farmer.farmer_id} · {farmer.phone_number}</span></div>
+          <div><strong>{farmer.full_name}</strong><span>{farmer.farmer_id} · {farmer.phone_number}</span></div>
           <b>{farmer.ward}<small>{farmer.plot_count} farm plot{farmer.plot_count === 1 ? "" : "s"}</small></b>
         </div>)}
       </div>
@@ -597,10 +547,12 @@ function Registry({ wards }: { wards: string[] }) {
   </div>;
 }
 
-function Overview({ dashboard, advisories, telemetry, evaluation, ward, setWard, scenario, setScenario, onStart, onSimulate, onAsk, askQuestion, setAskQuestion, running, onOpenWorkspace }: { dashboard: Dashboard | null; advisories: Advisory[]; telemetry: TelemetryReading[]; evaluation: EvaluationSummary | null; ward: string; setWard: (value: string) => void; scenario: string; setScenario: (value: string) => void; onStart: (scenario?: string) => Promise<void>; onSimulate: () => Promise<void>; onAsk: (question: string) => Promise<void>; askQuestion: string; setAskQuestion: (value: string) => void; running: boolean; onOpenWorkspace: () => void }) {
+function Overview({ dashboard, advisories, telemetry, evaluation, ward, setWard, scenario, setScenario, onStart, onSimulate, onAsk, askQuestion, setAskQuestion, running, onOpenWorkspace, registeredFarmers, wardHouseholds }: { dashboard: Dashboard | null; advisories: Advisory[]; telemetry: TelemetryReading[]; evaluation: EvaluationSummary | null; ward: string; setWard: (value: string) => void; scenario: string; setScenario: (value: string) => void; onStart: (scenario?: string) => Promise<void>; onSimulate: () => Promise<void>; onAsk: (question: string) => Promise<void>; askQuestion: string; setAskQuestion: (value: string) => void; running: boolean; onOpenWorkspace: () => void; registeredFarmers?: number; wardHouseholds?: number }) {
   const counts = dashboard?.counts;
   const pending = counts?.pending_advisories ?? 0;
-  const priorityText = pending > 0 ? `${pending} advisory needs your approval` : "Rachuonyo North: dry spell and Fall Armyworm alert";
+  const latestReading = telemetry[0];
+  const anomalyStatus = latestReading?.raw_payload_json?.ndvi_anomaly_status;
+  const priorityText = pending > 0 ? `${pending} advisory needs your approval` : `${ward}: ${anomalyStatus ?? "monitoring field conditions"}`;
   return <div className="overview">
     <div className="evaluation-strip panel-white">
       <div><span className="kicker">QUALITY CHECK</span><h3>Are these results reliable?</h3><p>Citations checked against KALRO and sensor data.</p></div>
@@ -609,16 +561,16 @@ function Overview({ dashboard, advisories, telemetry, evaluation, ward, setWard,
     <div className="welcome-grid">
       <section className="ask-card panel-white">
         <div className="ask-card-heading">
-          <div><span className="kicker">ASK ECOVUNA</span><h2>What needs your attention in {ward || "Rachuonyo North"}?</h2><p>Run a grounded ward check in seconds.</p></div>
+          <div><span className="kicker">ASK ECOVUNA</span><h2>What needs your attention in {ward || "your ward"}?</h2><p>Run a grounded ward check in seconds.</p></div>
           <span className="badge badge-warning badge-outline">Needs Officer Approval</span>
         </div>
         <form className="ask-form" onSubmit={(event) => { event.preventDefault(); if (askQuestion.trim()) void onAsk(askQuestion.trim()); }}>
-          <input className="input input-bordered" value={askQuestion} onChange={(event) => setAskQuestion(event.target.value)} placeholder="e.g. Check Mama Atieno's plot for moisture and Fall Armyworm…" aria-label="Ask Ecovuna a question" />
+          <input className="input input-bordered" value={askQuestion} onChange={(event) => setAskQuestion(event.target.value)} placeholder="e.g. Check soil moisture and Fall Armyworm risk in my ward…" aria-label="Ask Ecovuna a question" />
           <button className="btn btn-primary" type="submit" disabled={running || !ward || !askQuestion.trim()}>{running ? "Checking…" : "Ask Ecovuna"}</button>
         </form>
         <div className="prompt-row">
-          <button className="btn btn-ghost btn-sm" onClick={() => void onAsk("Which farms in Rachuonyo North need e-voucher subsidies today?")} disabled={running}>Mama Atieno & 1,850 farmers</button>
-          <button className="btn btn-ghost btn-sm" onClick={() => void onAsk("Which wards show flood or waterlogging risk?")} disabled={running}>Ndhiwa flood risk</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => void onAsk("Which farms need e-voucher subsidies today?")} disabled={running}>E-voucher queue{registeredFarmers !== undefined ? ` (${registeredFarmers.toLocaleString()})` : ""}</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => void onAsk("Which wards show flood or waterlogging risk?")} disabled={running}>Flood risk check</button>
         </div>
       </section>
       <section className="today-card">
@@ -626,13 +578,13 @@ function Overview({ dashboard, advisories, telemetry, evaluation, ward, setWard,
         <h3>Habari, WAO David Ochieng</h3>
         <p className="today-priority"><CircleAlert size={17} /> {priorityText}</p>
         <div className="today-meta">
-          <span><strong>1,850</strong> Registered Farmers</span>
-          <span><strong>{counts?.plots ?? "—"}</strong> sentinel plots</span>
+          <span><strong>{registeredFarmers !== undefined ? registeredFarmers.toLocaleString() : "—"}</strong> Registered Farmers</span>
+          <span><strong>{wardHouseholds !== undefined ? wardHouseholds.toLocaleString() : "—"}</strong> in {ward}</span>
         </div>
         <button className="btn btn-outline btn-sm" onClick={onOpenWorkspace}>Review approvals →</button>
       </section>
     </div>
-    <TelemetryPanel ward={ward} readings={telemetry} />
+    <TelemetryPanel ward={ward} readings={telemetry} registeredFarmers={registeredFarmers} />
     <div className="agent-command" style={{ marginTop: "20px" }}>
       <div><span className="kicker">WARD ANALYSIS</span><h2>Choose a ward and scenario</h2><p>One run checks sensors, guidance, and voucher fit.</p></div>
       <div className="command-controls">
@@ -643,7 +595,7 @@ function Overview({ dashboard, advisories, telemetry, evaluation, ward, setWard,
     </div>
     <div className="live-heading"><h2>County Coverage</h2><span>Live totals</span></div>
     <div className="live-metrics">
-      <LiveMetric label="Registered Farmers" value={REGISTERED_FARMERS} />
+      <LiveMetric label="Registered Farmers" value={registeredFarmers} />
       <LiveMetric label="Sentinel plots" value={counts?.plots} />
       <LiveMetric label="Advisories" value={counts?.advisories} />
       <LiveMetric label="Awaiting approval" value={counts?.pending_advisories} alert />
@@ -653,7 +605,7 @@ function Overview({ dashboard, advisories, telemetry, evaluation, ward, setWard,
       <div className="table-head"><span>WARD</span><span>FARMERS</span><span>PLOTS</span><span>SOIL MOISTURE</span><span>LAST READING</span></div>
       {dashboard?.wards.map((item) => <div className="table-row" key={item.ward}>
         <strong>{item.ward}</strong>
-        <span>{item.ward === "Rachuonyo North" ? "1,850" : item.households}</span>
+        <span>{item.households}</span>
         <span>{item.plots}</span>
         <span className={item.soil_moisture_pct !== null && item.soil_moisture_pct < 20 ? "danger-text" : ""}>{item.soil_moisture_pct === null ? "—" : `${item.soil_moisture_pct}%`}</span>
         <span>{item.last_telemetry_at ? new Date(item.last_telemetry_at).toLocaleString() : "Active"}</span>
@@ -664,39 +616,41 @@ function Overview({ dashboard, advisories, telemetry, evaluation, ward, setWard,
   </div>;
 }
 
-function TelemetryPanel({ ward, readings }: { ward: string; readings: TelemetryReading[] }) {
+function TelemetryPanel({ ward, readings, registeredFarmers }: { ward: string; readings: TelemetryReading[]; registeredFarmers?: number }) {
   const reading = readings[0];
-  const raw = reading?.raw_payload_json;
+  const raw = reading?.raw_payload_json as any;
   const vegetation = raw?.vegetation_indices;
-  const moistureDelta = raw?.moisture_delta_pct ?? (ward === "Rachuonyo North" ? -28 : -18);
-  const ndviStatus = raw?.ndvi_anomaly_status ?? (ward === "Rachuonyo North" ? "SEVERE_DEFICIT (-0.24 NDVI)" : "MODERATE_STRESS");
-  const sensorBadge = reading?.sensor_id ?? (ward === "Rachuonyo North" ? "KJB-HB-04" : "KJB-HB-01");
+  const moistureDelta = raw?.moisture_delta_pct;
+  const ndviStatus = raw?.ndvi_anomaly_status;
+  const pestAlert = raw?.pest_thermal_alert;
+  const sensorId = reading?.sensor_id;
+  const alertActive = Boolean(reading && (reading.soil_moisture_pct < 20 || (ndviStatus ?? "").includes("DEFICIT")));
   return <section className="telemetry-panel panel-white" aria-label="Ward Telemetry Card">
     <div className="telemetry-heading">
       <div>
         <span className="kicker">WARD TELEMETRY</span>
-        <h2>{ward || "Rachuonyo North"}, Homa Bay County</h2>
-        <p>Lead farmer <strong>{raw?.lead_persona ?? "Mama Atieno"}</strong> · <strong>1,850 Registered Farmers</strong></p>
+        <h2>{ward || "Ward"} telemetry, Homa Bay County</h2>
+        <p>{raw?.lead_persona ? <>Lead farmer <strong>{raw.lead_persona}</strong> · </> : null}<strong>{registeredFarmers !== undefined ? registeredFarmers.toLocaleString() : "—"} Registered Farmers</strong></p>
       </div>
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-        <span className="badge badge-error badge-outline">Alert Active</span>
+        {reading && <span className={`badge badge-outline ${alertActive ? "badge-error" : "badge-success"}`}>{alertActive ? "Alert Active" : "Monitoring"}</span>}
         {reading && <span className={`freshness-badge ${reading.freshness}`}><i /> {reading.freshness === "live" ? "Live sensor" : "Verified"}</span>}
       </div>
     </div>
     {!reading ? <p className="empty-copy">No reading for this ward yet.</p> : <>
       <div className="reading-grid">
-        <Reading label="Soil Moisture %" value={`${reading.soil_moisture_pct}% (${moistureDelta}% delta)`} />
+        <Reading label="Soil Moisture %" value={moistureDelta !== undefined && moistureDelta !== null ? `${reading.soil_moisture_pct}% (${moistureDelta}% delta)` : `${reading.soil_moisture_pct}%`} />
         <Reading label="Rainfall Delta (7d)" value={`${reading.rainfall_anomaly_mm} mm (${reading.precipitation_7d_mm} mm total)`} />
-        <Reading label="Vegetation Stress" value={ndviStatus} />
-        <Reading label="Sensor ID" value={sensorBadge} />
-        <Reading label="Thermal / Pest Threshold" value={`${reading.soil_temp_c}°C · Fall Armyworm Alert`} />
-        <Reading label="Vegetation Health" value={vegetation?.vegetation_health_index !== undefined ? `${vegetation.vegetation_health_index}% (NDVI ${vegetation.NDVI ?? 0.31})` : "38% (NDVI 0.31)"} />
+        <Reading label="Vegetation Stress" value={ndviStatus ?? "—"} />
+        <Reading label="Sensor ID" value={sensorId ?? "—"} />
+        <Reading label="Thermal / Pest Threshold" value={pestAlert ? `${reading.soil_temp_c}°C · ${pestAlert}` : `${reading.soil_temp_c}°C`} />
+        <Reading label="Vegetation Health" value={vegetation?.vegetation_health_index !== undefined ? `${vegetation.vegetation_health_index}% (NDVI ${vegetation.NDVI ?? "—"})` : "—"} />
       </div>
       <div className="reading-meta">
-        <span>Citation: <strong>[Sensor #{sensorBadge.replace("KJB-", "")}]</strong></span>
+        {sensorId && <span>Citation: <strong>[Sensor #{sensorId.replace("KJB-", "")}]</strong></span>}
         <span>Ward: <strong>{ward}, Homa Bay</strong></span>
         <span>Observed: {new Date(reading.timestamp).toLocaleString()}</span>
-        <span>Source: Field sensor network</span>
+        <span>Source: {raw?.["source"] ?? "field sensor"}</span>
       </div>
     </>}
   </section>;
@@ -711,17 +665,24 @@ function Operations({ summary, recommendations, ward, onRefresh }: { summary: Op
   const [message, setMessage] = useState("");
 
   useEffect(() => setItems(recommendations), [recommendations]);
-  function localMatches(value: string) {
-    return value ? VERIFIED_DEALER_MATCHES.filter((item) => item.input.category === value) : VERIFIED_DEALER_MATCHES;
+  async function loadDealerMatches() {
+    const response = await fetch(`${API}/api/operations/recommendations?limit=200`);
+    if (response.ok) {
+      const data = await response.json() as Recommendation[];
+      setItems(data);
+    }
   }
+  useEffect(() => {
+    loadDealerMatches().catch(console.error);
+  }, [API]);
   async function filterRecommendations(value: string) {
     setCategory(value);
     const response = await fetch(`${API}/api/operations/recommendations?ward=${encodeURIComponent(ward)}${value ? `&category=${encodeURIComponent(value)}` : ""}`);
     if (response.ok) {
       const nextItems = await response.json() as Recommendation[];
-      setItems(nextItems.length > 0 ? nextItems : localMatches(value));
+      setItems(nextItems.length > 0 ? nextItems : []);
     } else {
-      setItems(localMatches(value));
+      setItems([]);
     }
   }
   async function confirm(item: Recommendation) {
@@ -750,7 +711,7 @@ function Operations({ summary, recommendations, ward, onRefresh }: { summary: Op
     <div className="operations-summary">
       <LiveMetric label="Verified dealers" value={summary?.verified_partners ?? 5} />
       <LiveMetric label="Inputs in stock" value={summary?.in_stock_inputs} />
-      <LiveMetric label="Recommended matches" value={summary?.recommended_assignments || VERIFIED_DEALER_MATCHES.length} alert />
+      <LiveMetric label="Recommended matches" value={summary?.recommended_assignments || 0} alert />
       <LiveMetric label="Confirmed" value={summary?.confirmed_assignments} />
     </div>
     <section className="panel-white operations-panel">
@@ -761,7 +722,8 @@ function Operations({ summary, recommendations, ward, onRefresh }: { summary: Op
   </div>;
 }
 
-function Workspace({ run, advisories, visibleStepsCount, dispatchReceipt, onStart, onDecision, running }: { run: Run | null; advisories: Advisory[]; visibleStepsCount: number; dispatchReceipt: DispatchReceipt | null; onStart: () => void; onDecision: (approved: boolean) => void; running: boolean }) {
+interface WorkspaceProps { run: Run | null; advisories: Advisory[]; visibleStepsCount: number; dispatchReceipt: DispatchReceipt | null; onStart: () => void; onDecision: (approved: boolean) => void; running: boolean; registeredFarmers?: number | undefined }
+function Workspace({ run, advisories, visibleStepsCount, dispatchReceipt, onStart, onDecision, running, registeredFarmers }: WorkspaceProps) {
   if (!run) return <div className="empty-workspace panel-white"><span className="empty-agent-icon"><Sparkles size={24} /></span><h2>No active run</h2><p>Simulate a ward alert to see the agent's checks.</p><button className="run-button" onClick={onStart} disabled={running}><Play size={14} />{running ? "Analyzing…" : "Simulate Ward Alert"}</button>{advisories.length > 0 && <p className="existing-note">{advisories.length} earlier advisories available.</p>}</div>;
   const pending = run.status === "PAUSED_AT_WAO_GATE";
   const approved = run.status === "APPROVED_DISPATCHED";
@@ -770,7 +732,7 @@ function Workspace({ run, advisories, visibleStepsCount, dispatchReceipt, onStar
       <div>
         <span className="kicker">ACTIVE RUN</span>
         <h2>{run.ward} triage</h2>
-        <p>Completed in {Math.round(run.cost_telemetry.duration_ms)} ms · 1,850 Registered Farmers</p>
+        <p>Completed in {Math.round(run.cost_telemetry.duration_ms)} ms · {registeredFarmers?.toLocaleString() ?? "—"} Farmers</p>
       </div>
       <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
         <span className="badge badge-warning badge-outline">Alert Active</span>

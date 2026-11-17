@@ -8,6 +8,7 @@ from .health import router as health_router
 from .mcp import router as mcp_router
 from .operations import router as operations_router
 from .registry import router as registry_router
+from .telco import router as telco_router
 
 __all__ = [
     "agent_router",
@@ -16,4 +17,5 @@ __all__ = [
     "mcp_router",
     "operations_router",
     "registry_router",
+    "telco_router",
 ]
