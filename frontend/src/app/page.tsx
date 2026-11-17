@@ -94,7 +94,7 @@ type Advisory = {
   status: string;
   output_variants?: OutputVariant[];
 };
-type Trace = { node: string; tool: string; server: string; latency_ms: number; output: Record<string, unknown> };
+type Trace = { node: string; tool: string; server: string; latency_ms: number; output: Record<string, unknown>; transition?: string | null };
 type Run = {
   run_id: string;
   ward: string;
@@ -219,11 +219,12 @@ export default function Home() {
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Unable to load telemetry readings."));
   }, [ward]);
 
-  function animateReasoningTimeline() {
+  function animateReasoningTimeline(stepCount?: number) {
+    const target = stepCount && stepCount > 0 ? stepCount : 4;
     setVisibleStepsCount(1);
-    setTimeout(() => setVisibleStepsCount(2), 280);
-    setTimeout(() => setVisibleStepsCount(3), 560);
-    setTimeout(() => setVisibleStepsCount(4), 840);
+    for (let step = 2; step <= target; step += 1) {
+      setTimeout(() => setVisibleStepsCount(step), (step - 1) * 280);
+    }
   }
 
   async function loadAudit() {
@@ -277,8 +278,9 @@ export default function Home() {
         body: JSON.stringify({ ward, scenario_override: requestedScenario }),
       });
       if (!response.ok) throw new Error((await response.json()).detail ?? "Agent run failed.");
-      setRun(await response.json());
-      animateReasoningTimeline();
+      const result = await response.json() as Run;
+      setRun(result);
+      animateReasoningTimeline(result.execution_trace?.length ?? 0);
       await loadData();
       setView("workspace");
       notify("Alert analyzed");
@@ -308,7 +310,7 @@ export default function Home() {
       if (!response.ok) throw new Error((await response.json()).detail ?? "Automated Rachuonyo anomaly trigger failed.");
       const payload = await response.json() as { run: Run };
       setRun(payload.run);
-      animateReasoningTimeline();
+      animateReasoningTimeline(payload.run.execution_trace?.length ?? 0);
       await loadData();
       setView("workspace");
       notify("Alert analyzed");
@@ -349,7 +351,7 @@ export default function Home() {
       const payload = await response.json() as { session_id?: string; message: string; run: Run };
       if (payload.session_id) setSessionId(payload.session_id);
       setRun(payload.run);
-      animateReasoningTimeline();
+      animateReasoningTimeline(payload.run.execution_trace?.length ?? 0);
       const gateStatusNote = payload.run.advisory ? "This run is waiting for your approval." : "Staging stopped safely for field verification.";
       setChatMessages((items) => [...items, { role: "agent", text: `${payload.message} ${gateStatusNote}`, run: payload.run }]);
       await loadData();
@@ -746,41 +748,122 @@ function Workspace({ run, advisories, visibleStepsCount, dispatchReceipt, onStar
   </div>;
 }
 
-function AgentReasoningTimeline({ run, visibleStepsCount, pending, approved }: { run: Run; visibleStepsCount: number; pending: boolean; approved: boolean }) {
-  const steps = [
-    {
-      stepNumber: 1,
-      label: "Sensor check",
-      headline: "Soil moisture down 28% and Fall Armyworm alert.",
-      detail: "Sensor #HB-04 · 1,850 farmers affected.",
-      status: "Done",
-      badgeClass: "badge-success",
-    },
-    {
-      stepNumber: 2,
-      label: "Guidance lookup",
-      headline: "KALRO drought and pest protocol cited.",
-      detail: "Rule KALRO-HB-2026-01 · Section 4.2.",
-      status: "Cited",
-      badgeClass: "badge-info",
-    },
-    {
-      stepNumber: 3,
-      label: "Voucher check",
-      headline: "E-voucher prepared for 1,850 farmers.",
-      detail: "KES 225 per plot · Kendu Bay hub.",
-      status: "Prepared",
-      badgeClass: "badge-success",
-    },
-    {
-      stepNumber: 4,
-      label: "Officer approval",
-      headline: pending ? "Awaiting officer approval before dispatch." : approved ? "Approved and sent to 1,850 farmers." : "Halted for officer review.",
+type AgentStep = {
+  stepNumber: number;
+  tool: string;
+  server: string;
+  label: string;
+  headline: string;
+  detail: string;
+  status: string;
+  badgeClass: string;
+  latencyLabel: string;
+  output: Record<string, unknown>;
+};
+
+function friendlyToolName(tool: string): string {
+  const words = tool.replace(/[_-]+/g, " ").trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "Tool";
+  return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+}
+
+function agentStepFromTrace(entry: Trace, index: number, run: Run, pending: boolean, approved: boolean): AgentStep {
+  const tool = entry.tool ?? "unknown";
+  const node = entry.node ?? "";
+  const server = entry.server ?? "Ecovuna_Telemetry";
+  const output = (entry.output ?? {}) as Record<string, unknown>;
+  const latencyLabel = `${Math.round(Number(entry.latency_ms) ?? 0)} ms`;
+  const approvalLike = /approv|gate|wao|decision|hitl/i.test(tool) || node.includes("human_approval") || /stage_advisory|stage_write/.test(tool);
+
+  if (approvalLike) {
+    const status = approved ? "Sent" : pending ? "Needs Approval" : "Held";
+    return {
+      stepNumber: index + 1,
+      tool,
+      server,
+      label: friendlyToolName(tool),
+      headline: approved ? "Approved and sent to affected farmers." : pending ? "Awaiting officer approval before dispatch." : "Halted for officer review.",
       detail: "SMS and USSD stay locked until sign-off.",
-      status: pending ? "Needs Approval" : approved ? "Sent" : "Held",
-      badgeClass: pending ? "badge-warning" : "badge-success",
-    },
-  ];
+      status,
+      badgeClass: approved ? "badge-success" : "badge-warning",
+      latencyLabel,
+      output,
+    };
+  }
+
+  let status = "Done";
+  let badgeClass = "badge-success";
+  let headline = `Tool ${friendlyToolName(tool)} completed.`;
+  let detail = `${node} · via ${server} · ${latencyLabel}`;
+
+  if (/create_execution_plan/.test(tool)) {
+    headline = "Execution plan created for grounded triage.";
+    detail = `Planned agent steps for ${run.ward}.`;
+  } else if (/fetch_kijanibox_telemetry/.test(tool)) {
+    headline = "Fetched live KijaniSpace telemetry.";
+  } else if (/fetch_open_meteo_context/.test(tool)) {
+    headline = "Fetched Open-Meteo weather context.";
+  } else if (/fetch_ward_telemetry/.test(tool)) {
+    headline = "Fetched ward telemetry evidence.";
+  } else if (/kalro|agronomy|protocol|rag|knowledge/i.test(tool)) {
+    status = "Cited";
+    badgeClass = "badge-info";
+    headline = `Cited agronomy protocol ${String(output.rule_id ?? "")}`.trim();
+  } else if (/evoucher|voucher|prepare|subsidy/i.test(tool)) {
+    status = "Prepared";
+    badgeClass = "badge-success";
+    headline = `Prepared e-voucher batch ${String(output.voucher_code ?? "")}`.trim();
+  } else if (/draft/i.test(tool)) {
+    status = "Draft";
+    badgeClass = "badge-info";
+    headline = "Drafted localized advisory variants.";
+  } else if (/detect|conflict|safety/i.test(tool)) {
+    status = "Checked";
+    badgeClass = "badge-info";
+    headline = `Checked signal conflicts · confidence ${String(output.confidence ?? "")}`.trim();
+  }
+
+  return { stepNumber: index + 1, tool, server, label: friendlyToolName(tool), headline, detail, status, badgeClass, latencyLabel, output };
+}
+
+function buildAgentSteps(run: Run, pending: boolean, approved: boolean): AgentStep[] {
+  const trace = run.execution_trace ?? [];
+  if (trace.length === 0) {
+    return [
+      { stepNumber: 1, tool: "fetch_ward_telemetry", server: "DynamoDB + KijaniBox IoT", label: "Sensor check", headline: "Soil moisture down 28% and Fall Armyworm alert.", detail: "Sensor #HB-04 · 1,850 farmers affected.", status: "Done", badgeClass: "badge-success", latencyLabel: "—", output: {} },
+      { stepNumber: 2, tool: "search_agronomy_protocols", server: "AWS S3 + Bedrock RAG", label: "Guidance lookup", headline: "KALRO drought and pest protocol cited.", detail: "Rule KALRO-HB-2026-01 · Section 4.2.", status: "Cited", badgeClass: "badge-info", latencyLabel: "—", output: {} },
+      { stepNumber: 3, tool: "prepare_evoucher_batch", server: "Subsidy Engine", label: "Voucher check", headline: "E-voucher prepared for 1,850 farmers.", detail: "KES 225 per plot · Kendu Bay hub.", status: "Prepared", badgeClass: "badge-success", latencyLabel: "—", output: {} },
+      { stepNumber: 4, tool: "wao_decision", server: "HITL Gate", label: "Officer approval", headline: pending ? "Awaiting officer approval before dispatch." : approved ? "Approved and sent to 1,850 farmers." : "Halted for officer review.", detail: "SMS and USSD stay locked until sign-off.", status: pending ? "Needs Approval" : approved ? "Sent" : "Held", badgeClass: pending ? "badge-warning" : approved ? "badge-success" : "badge-warning", latencyLabel: "—", output: {} },
+    ];
+  }
+
+  const steps: AgentStep[] = [];
+  for (let index = 0; index < trace.length; index += 1) {
+    steps.push(agentStepFromTrace(trace[index], index, run, pending, approved));
+  }
+  return steps;
+}
+
+function TraceCallCard({ step }: { step: AgentStep }) {
+  const awaitingAttention = step.status === "Needs Approval" || step.status === "Held";
+  return <details className="trace-card">
+    <summary>
+      <span className="trace-check" aria-hidden="true">{awaitingAttention ? <Clock3 size={12} /> : <Check size={12} />}</span>
+      <span>
+        <strong>{step.label}</strong>
+        <small>{step.detail}</small>
+      </span>
+      <time>{step.latencyLabel}</time>
+      <span className={`badge ${step.badgeClass} badge-outline`}>{step.status}</span>
+    </summary>
+    <pre>{JSON.stringify(step.output ?? {}, null, 2)}</pre>
+  </details>;
+}
+
+function AgentReasoningTimeline({ run, visibleStepsCount, pending, approved }: { run: Run; visibleStepsCount: number; pending: boolean; approved: boolean }) {
+  const toolCalls = run.execution_trace ?? [];
+  const steps = buildAgentSteps(run, pending, approved);
+  const visibleSteps = steps.slice(0, visibleStepsCount);
 
   return <section className="panel-white" style={{ padding: "20px", marginTop: "16px" }} aria-label="Agent steps">
     <div className="live-heading" style={{ marginTop: 0 }}>
@@ -788,10 +871,9 @@ function AgentReasoningTimeline({ run, visibleStepsCount, pending, approved }: {
         <span className="kicker">EXECUTION TIMELINE</span>
         <h2>Agent Steps & Tool Checks</h2>
       </div>
-      <span className="badge badge-success badge-outline">4 checks</span>
+      <span className="badge badge-success badge-outline">{toolCalls.length} tool calls</span>
     </div>
-    <div className="recommendation-list">
-      {steps.slice(0, visibleStepsCount).map((step) => <article className="recommendation-card" key={step.stepNumber} style={{ borderLeft: step.stepNumber === 4 && pending ? "4px solid #7c4700" : "4px solid #06684b" }}>
+    {toolCalls.length > 0 ? <div className="trace-stack">{visibleSteps.map((step) => <TraceCallCard key={`${step.tool}-${step.stepNumber}`} step={step} />)}</div> : <div className="recommendation-list">{visibleSteps.map((step) => <article className="recommendation-card" key={step.stepNumber} style={{ borderLeft: step.stepNumber === 4 && pending ? "4px solid #7c4700" : "4px solid #06684b" }}>
         <div className="recommendation-main">
           <div>
             <span className="recommendation-id">STEP {step.stepNumber} · {step.label}</span>
@@ -800,8 +882,7 @@ function AgentReasoningTimeline({ run, visibleStepsCount, pending, approved }: {
           </div>
           <span className={`badge ${step.badgeClass} badge-outline`}>{step.status}</span>
         </div>
-      </article>)}
-    </div>
+      </article>)}</div>}
   </section>;
 }
 
